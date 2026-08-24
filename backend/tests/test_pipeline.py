@@ -64,6 +64,28 @@ class CollectingReporter:
         self.events.append(event)
 
 
+class FakeNoLocate:
+    """Locator that never finds an audio match."""
+    def locate(self, video, target):
+        return None
+
+
+def test_audio_mode_uses_locator(synthetic_clip, tmp_path):
+    path, truth = synthetic_clip
+    cfg = DEFAULT.__class__(output_dir=tmp_path / "out_audio", cache_dir=tmp_path / "cache_audio")
+    res = run(str(path), truth["text"], cfg=cfg, mode="audio", local=True, locator=FakeLocator())
+    assert res.source == "audio"
+    assert res.frame_index == 120
+
+
+def test_audio_mode_no_match_raises_pipeline_error(synthetic_clip, tmp_path):
+    from dialogue_finder.pipeline import PipelineError
+    path, truth = synthetic_clip
+    cfg = DEFAULT.__class__(output_dir=tmp_path / "out_audio2", cache_dir=tmp_path / "cache_audio2")
+    with pytest.raises(PipelineError):
+        run(str(path), truth["text"], cfg=cfg, mode="audio", local=True, locator=FakeNoLocate())
+
+
 def test_hybrid_retries_widened_window_not_whole_video(synthetic_clip, tmp_path):
     path, truth = synthetic_clip
     cfg = DEFAULT.__class__(output_dir=tmp_path / "out2", cache_dir=tmp_path / "cache2")

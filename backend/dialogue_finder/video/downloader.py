@@ -14,6 +14,15 @@ class DownloadError(Exception):
     """Raised when the video cannot be fetched or read. Message is user-facing."""
 
 
+class _QuietLogger:
+    """Swallow yt-dlp's own console output; failures surface as DownloadError -> 'Error: ...' instead."""
+
+    def debug(self, msg: str) -> None: ...
+    def info(self, msg: str) -> None: ...
+    def warning(self, msg: str) -> None: ...
+    def error(self, msg: str) -> None: ...
+
+
 def ensure_ffmpeg() -> None:
     import static_ffmpeg
     static_ffmpeg.add_paths()          # downloads ffmpeg+ffprobe once, then adds them to PATH
@@ -47,6 +56,7 @@ def fetch_video(url: str, cfg: Config, reporter: ProgressReporter) -> Path:
         "no_warnings": True,
         "noprogress": True,
         "progress_hooks": [hook],
+        "logger": _QuietLogger(),
     }
     reporter.emit(StageEvent("download", "running", f"fetching {url}", 0.0))
     try:

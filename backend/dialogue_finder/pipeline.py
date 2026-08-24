@@ -85,7 +85,9 @@ def run(source_spec: str, target: str, *, cfg: Config = DEFAULT, reporter: Progr
             video = fetch_video(source_spec, cfg, reporter)
         probe(video)  # validates the file is a readable video; raises DownloadError otherwise
     except DownloadError as e:
-        reporter.emit(StageEvent("error", "error", str(e)))
+        # no reporter.emit here: cli.main already prints "Error: {e}" for PipelineError,
+        # and StageEvent(..., progress=None) bypasses PrintReporter's non-verbose filter,
+        # which would duplicate the message on stderr and break "starts with Error:" checks.
         raise PipelineError(str(e)) from e
     timings["download"] = time.perf_counter() - t0
 
@@ -93,7 +95,7 @@ def run(source_spec: str, target: str, *, cfg: Config = DEFAULT, reporter: Progr
     window: Window | None = None
     t1 = time.perf_counter()
     if mode in ("hybrid", "audio"):
-        if locator is None and mode == "hybrid":
+        if locator is None and mode in ("hybrid", "audio"):
             try:
                 from .audio.locator import WhisperLocator
                 locator = WhisperLocator(cfg, reporter)
@@ -177,7 +179,9 @@ def run(source_spec: str, target: str, *, cfg: Config = DEFAULT, reporter: Progr
                            source="audio", note="no on-screen text matched; frame at first spoken word",
                            window=window, candidates=cands)
         weak = max(cands, key=lambda c: c.score) if cands else Candidate(0, 0.0, "", 0.0)
+        note = (f"best OCR similarity only {weak.score:.2f}" if cands
+                else "no text detected anywhere; frame 0 returned")
         reporter.emit(StageEvent("refine", "fallback", f"no match anywhere; best effort frame {weak.frame_index}"))
         return _finish(src, cfg, reporter, timings, t0, weak.frame_index, "low-confidence result",
                        timestamp_s=weak.timestamp_s, text=weak.text, confidence="LOW", source="ocr-weak",
-                       note=f"best OCR similarity only {weak.score:.2f}", candidates=cands)
+                       note=note, candidates=cands)

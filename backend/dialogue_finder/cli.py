@@ -47,8 +47,13 @@ def main(argv: list[str] | None = None) -> int:
     print(res.format_block())
     for alt in res.alternatives:
         print(f"Also at   : {alt.frame_index} ({alt.timestamp_s:.3f}s) score {alt.score:.2f}")
-    cfg.output_dir.mkdir(parents=True, exist_ok=True)
-    (cfg.output_dir / "result.json").write_text(json.dumps(res.to_dict(), indent=2, default=str), encoding="utf-8")
+    try:
+        cfg.output_dir.mkdir(parents=True, exist_ok=True)
+        (cfg.output_dir / "result.json").write_text(json.dumps(res.to_dict(), indent=2, default=str),
+                                                     encoding="utf-8")
+    except OSError as e:
+        print(f"Error: could not write output: {e}", file=sys.stderr)
+        return 1
     if args.json:
         print(json.dumps(res.to_dict(), indent=2, default=str))
     return 0

@@ -165,4 +165,119 @@ Test progression across Task 8: 31 (Task 7 baseline) → 33 (locator) → 34
 (widened-retry pipeline fix) → 36 (matcher coverage-scaling fix).
 
 ## Phase 4 — Test and measure
+
+### Never-crash pass (Task 9, Step 1)
+
+`backend/tests/test_never_crash.py` (3 tests, 1 marked `slow`):
+
+- `test_unreachable_url_is_clean` — `--url https://example.invalid/...` fails DNS
+  resolution; asserts exit 1, stderr starts with `Error:`, no `Traceback`.
+- `test_corrupt_file_is_clean` — `--local` a file containing `b"not a video"`;
+  asserts exit 1, no `Traceback`.
+- `test_output_write_failure_is_clean` (slow — runs a real synthetic-clip OCR pass) —
+  monkeypatches `Path.write_text` to raise `OSError` only for `result.json`; asserts
+  exit 1, stderr contains `Error: could not write output:`, no `Traceback`.
+
+Two bugs surfaced and were fixed to make these pass:
+
+1. **Duplicate/leaking error line.** `pipeline.run`'s `DownloadError` handler emitted
+   a `StageEvent("error", "error", str(e))` before raising `PipelineError`.
+   `PrintReporter.emit` only filters events that carry a `progress` value, so this
+   `error`-stage event (progress `None`) printed unconditionally — even in
+   non-verbose mode — as `[error:error] Could not download video: ...`, ahead of
+   cli.py's own `Error: ...` line. That broke "stderr starts with Error:" and was
+   pure duplication (cli.py already prints the same message via
+   `except PipelineError`). Removed the redundant `reporter.emit` call.
+2. **yt-dlp's own error text leaking to stderr.** Even with `quiet`/`no_warnings`,
+   yt-dlp's default logger still writes `ERROR: ...` lines straight to stderr on
+   failure. Added a `_QuietLogger` (no-op `debug`/`info`/`warning`/`error`) and wired
+   it in via `opts["logger"]`, so failures surface only through our own
+   `DownloadError` -> `Error: ...` path.
+
+**Controller ruling (a) — output-write errors.** `cli.main`'s `cfg.output_dir.mkdir`
+and `result.json` write sat outside any `try`. Wrapped them so an `OSError` there
+prints `Error: could not write output: ...` and returns 1 instead of a traceback.
+Covered by `test_output_write_failure_is_clean` above.
+
+**Controller ruling (b) — weak-fallback note.** `pipeline.run`'s final fallback
+(`Candidate(0, 0.0, "", 0.0)` when `cands` is empty) previously reported
+`note=f"best OCR similarity only {weak.score:.2f}"` even when there was no
+candidate at all (`0.00` — misleading, reads as "we found something, barely").
+Now: `note = "no text detected anywhere; frame 0 returned"` when `cands` is empty,
+`f"best OCR similarity only {weak.score:.2f}"` otherwise.
+
+**Controller ruling (extra) — `--mode audio` must build its own locator.**
+`pipeline.run` only constructed `WhisperLocator` when `locator is None and mode ==
+"hybrid"`, so `--mode audio` with no injected `locator=` silently produced
+`window=None` and raised `PipelineError("No audio match found...")` even on a video
+with clear matching speech — `audio` mode was unusable stand-alone. Changed the
+guard to `mode in ("hybrid", "audio")`. Covered by two new fast tests in
+`test_pipeline.py`: `test_audio_mode_uses_locator` (`FakeLocator` -> `source ==
+"audio"`, `frame_index == 120`) and `test_audio_mode_no_match_raises_pipeline_error`
+(`FakeNoLocate` -> `PipelineError`).
+
+Full suite after the never-crash pass: **43 passed** — 3 new in
+`test_never_crash.py` and 2 new in `test_pipeline.py` (the audio-mode-locator
+tests) on top of the pre-Task-9 suite.
+
+### Synthetic benchmark (Task 9, Step 2)
+
+`backend/bench/run_bench.py` runs `dialogue_finder.pipeline.run` in OCR mode over 8
+synthetic variants from `bench/make_clip.py` (position, fade, scale, resolution,
+frame rate) and writes `docs/BENCHMARK.md`. Full run: **~200 s** on CPU (RapidOCR
+approx. 0.6 s/call), in line with the ~3-5 min estimate.
+
+| variant | truth frame | found frame | error (frames) | source | confidence | seconds |
+|---|---|---|---|---|---|---|
+| baseline_640x360_24fps_bottom | 120 | 120 | 0 | ocr | HIGH | 24.5 |
+| top_position | 120 | 120 | 0 | ocr | HIGH | 27.3 |
+| center_position | 120 | 120 | 0 | ocr | HIGH | 30.1 |
+| fade_12_frames | 120 | 121 | 1 | ocr | MEDIUM | 23.3 |
+| small_text_360p | 120 | 120 | 0 | ocr | HIGH | 23.0 |
+| hd_1280x720 | 120 | 120 | 0 | ocr | HIGH | 23.6 |
+| 30fps | 150 | 150 | 0 | ocr | HIGH | 23.0 |
+| 60fps | 300 | 300 | 0 | ocr | HIGH | 24.1 |
+
+Every pop-in variant (position, scale, resolution, frame rate) lands on the exact
+truth frame with `HIGH` confidence — `read_dialogue`'s full-frame OCR fallback
+already handles `center_position` text outside the bottom band, so nothing needed
+fixing there. The one non-zero row is `fade_12_frames`: text fades in over 12
+frames, so "first frame with detectable text" is inherently fuzzy at low opacity;
+the pipeline lands 1 frame after the nominal fully-transparent start (well inside
+the 12-frame fade window) and correctly reports `MEDIUM` confidence via
+`classify_appearance`'s fade-in detection — this is the expected, documented limit
+for gradual-appearance text, not a bug.
+
+### Real-video matrix (Task 9, Step 3)
+
+| video | duration | has subs? | locate | scan | source | frame | timestamp | time | correct by eye? |
+|---|---|---|---|---|---|---|---|---|---|
+| [ok.ru Sherlock Holmes ep.](https://ok.ru/video/248244667877) (Phase 3, hybrid) | 3261 s | no burned-in subs | ok (score 0.95, window 325.1-327.8s) | window then widened retry, both no on-screen match | audio | 7794 | 00:05:25.073 | 63.7 s | yes — close-up of Holmes actor, no subtitle text, consistent with audio source |
+| [Squid Game Intro Sequence — English Subtitles](https://www.youtube.com/watch?v=3_XZ354E9uE) (burned-in captions) | 146 s | yes, burned-in English subtitles (Korean audio) | ok but weak/garbled (score 0.63, window 24.6-29.6s — noisy Korean-to-English `whisper --task translate`) | narrow window (21.6-32.6s) no match, then widened retry (10-45s) hit | ocr | 297 | 00:00:09.900 | 2m 1.3s full CLI (cached download; dominated by whisper transcription of the whole 146 s clip) | yes — frame shows the on-screen caption "In my town, we had a game called the \"Squid Game.\"" verbatim |
+| [A one minute TEDx Talk for the digital age \| Woody Roseland](https://www.youtube.com/watch?v=1aA1WGON49E) (no captions) | 81 s | no burned-in captions | ok (score 1.00, window 34.1-34.9s: 'Thanks for the click.') | window (31.1-37.9s) no match, then widened retry (19-50s) no match | audio | 818 | 00:00:34.117 | 1m 24.8s full CLI (cached download) | yes — speaker on stage, no on-screen text anywhere, consistent with `source: audio`; timestamp lands on the correct spoken line per the whisper transcript |
+
+Commands used:
+```
+cd backend
+../.venv/Scripts/python -m dialogue_finder --url "https://www.youtube.com/watch?v=3_XZ354E9uE" \
+  --text "In my town, we had a game called the Squid Game." --mode hybrid --verbose --out ../output/squidgame_intro
+
+../.venv/Scripts/python -m dialogue_finder --url "https://www.youtube.com/watch?v=1aA1WGON49E" \
+  --text "Thanks for the click." --mode hybrid --verbose --out ../output/tedx_digital_age
+```
+
+**What the matrix shows:** the hybrid pipeline handles both directions of the
+captions/no-captions split correctly, by the intended route. When burned-in text
+exists (Squid Game clip) it lands on `source: ocr` with an exact, byte-for-byte
+on-screen match despite a badly garbled audio-locate window (Korean speech run
+through `whisper --task translate`) — the widened-retry fallback (Task 8's fix)
+is what rescues it after the narrow window misses. When no on-screen text exists
+(both the ok.ru episode and the TEDx clip) both OCR scan attempts (window +
+widened retry) correctly fail to match and the pipeline falls back to `source:
+audio`, landing on the right spoken line each time. All three real videos were
+reachable on this network — no YouTube-blocked fallback to a synthetic variant was
+needed. Both YouTube downloads used the CLI's own `bv*[height<=480]` cache path and
+completed in a few seconds (2.13 MiB and 4.79 MiB), so wall time on the real-video
+runs is dominated by `whisper base` CPU transcription (60-120 s), not download.
+
 ## Phase 5 — Reflect: limits and extensions
