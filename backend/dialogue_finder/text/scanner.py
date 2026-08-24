@@ -13,19 +13,20 @@ def coarse_scan(source, extractor, target: str, start_s: float, end_s: float, fp
                 reporter: ProgressReporter, read: Callable = read_dialogue) -> list[Candidate]:
     """OCR every (source.fps / fps)-th frame in [start_s, end_s]; return one Candidate per sampled frame."""
     step = max(1, int(round(source.fps / fps)))
-    a, b = source.index_for_time(start_s), source.index_for_time(end_s)
-    total = max(1, (b - a) // step + 1)
+    start_idx, end_idx = source.index_for_time(start_s), source.index_for_time(end_s)
+    total = max(1, (end_idx - start_idx) // step + 1)
     out: list[Candidate] = []
     best = 0.0
-    for n, (i, frame) in enumerate(source.iter_range(a, b, step)):
+    for sample_num, (i, frame) in enumerate(source.iter_range(start_idx, end_idx, step)):
         text = read(extractor, frame, cfg)
-        s = score_contains(target, text)
-        best = max(best, s)
-        out.append(Candidate(i, source.time_for_index(i), text, s))
-        if n % 10 == 0 or s >= cfg.ocr_match_threshold:
-            reporter.emit(StageEvent("scan", "running", f"frame {i} score {s:.2f} (best {best:.2f})",
-                                     min(1.0, (n + 1) / total),
-                                     {"frame_index": i, "score": s, "text": text, "best": best}))
+        score = score_contains(target, text)
+        best = max(best, score)
+        out.append(Candidate(i, source.time_for_index(i), text, score))
+        is_hit = score >= cfg.ocr_match_threshold
+        if sample_num % 10 == 0 or is_hit:
+            reporter.emit(StageEvent("scan", "running", f"frame {i} score {score:.2f} (best {best:.2f})",
+                                     min(1.0, (sample_num + 1) / total),
+                                     {"frame_index": i, "score": score, "text": text, "best": best}))
     return out
 
 

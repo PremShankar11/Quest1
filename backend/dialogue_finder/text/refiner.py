@@ -26,15 +26,15 @@ def refine_first_frame(source, extractor, target: str, hit_index: int, prev_inde
     """Binary-search OCR score between prev_index (no match) and hit_index (match) → exact first frame."""
     cache: dict[int, tuple[str, float]] = {}
 
-    def look(i: int) -> tuple[str, float]:
+    def ocr_at(i: int) -> tuple[str, float]:
         if i not in cache:
             text = read(extractor, source.frame_at(i), cfg)
             cache[i] = (text, score_contains(target, text))
         return cache[i]
 
     lo = max(-1, prev_index)
-    first = first_true(lo, hit_index, lambda i: look(i)[1] >= cfg.ocr_match_threshold)
-    text, score = look(first)
+    first = first_true(lo, hit_index, lambda i: ocr_at(i)[1] >= cfg.ocr_match_threshold)
+    text, score = ocr_at(first)
     return Candidate(first, source.time_for_index(first), text, score)
 
 
