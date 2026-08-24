@@ -42,3 +42,36 @@ def test_bad_local_path_raises_pipeline_error(tmp_path):
     from dialogue_finder.pipeline import PipelineError
     with pytest.raises(PipelineError):
         run(str(tmp_path / "missing.mp4"), "x", mode="ocr", local=True)
+
+
+class FakeNoMatch:
+    """TextExtractor that never finds on-screen text, forcing every OCR scan to miss."""
+    def read(self, image) -> str:
+        return ""
+
+
+class FakeLocator:
+    """Locator that always returns a fixed window at 5 s."""
+    def locate(self, video, target):
+        return Window(5.0, 5.5, 0.95, target)
+
+
+class CollectingReporter:
+    def __init__(self) -> None:
+        self.events = []
+
+    def emit(self, event) -> None:
+        self.events.append(event)
+
+
+def test_hybrid_retries_widened_window_not_whole_video(synthetic_clip, tmp_path):
+    path, truth = synthetic_clip
+    cfg = DEFAULT.__class__(output_dir=tmp_path / "out2", cache_dir=tmp_path / "cache2")
+    reporter = CollectingReporter()
+    window = Window(5.0, 5.5, 0.95, truth["text"])
+    res = run(str(path), truth["text"], cfg=cfg, mode="hybrid", local=True,
+             extractor=FakeNoMatch(), locator=FakeLocator(), reporter=reporter)
+    assert res.source == "audio"
+    assert res.frame_index == 120
+    assert res.text == window.matched_text
+    assert not any("whole video" in e.message for e in reporter.events)

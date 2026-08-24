@@ -17,11 +17,14 @@ def normalize(text: str) -> str:
 
 
 def score_contains(target: str, haystack: str) -> float:
-    """How well `target` appears inside `haystack` (0..1). Tolerant of OCR noise and extra words."""
+    """How well `target` appears inside `haystack` (0..1). Tolerant of OCR noise and extra words.
+    partial_ratio alone scores any short substring of the target as 1.0 (a lone OCR "R" matched a 28-char
+    line), so the score is scaled by how much of the target's length the haystack can actually cover."""
     t, h = normalize(target), normalize(haystack)
     if not t or not h:
         return 0.0
-    return fuzz.partial_ratio(t, h) / 100.0
+    coverage = min(1.0, len(h) / len(t))
+    return fuzz.partial_ratio(t, h) / 100.0 * coverage
 
 
 def score_similar(a: str, b: str) -> float:

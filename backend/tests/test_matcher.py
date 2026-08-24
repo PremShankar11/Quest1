@@ -50,6 +50,15 @@ def test_best_word_window_low_score_when_absent():
     assert best_word_window(words, "my mind rebels at stagnation").score < 0.5
 
 
+def test_score_contains_short_fragment_is_low():
+    assert score_contains("My mind rebels at stagnation", "R") < 0.1
+    assert score_contains("My mind rebels at stagnation", "mind") < 0.3
+
+
+def test_score_contains_near_full_read_still_high():
+    assert score_contains("My mind rebels at stagnation", "My mindrebels at stagnation") >= 0.9
+
+
 def test_format_timestamp():
     assert format_timestamp(0) == "00:00:00.000"
     assert format_timestamp(3725.5) == "01:02:05.500"

@@ -139,10 +139,15 @@ def run(source_spec: str, target: str, *, cfg: Config = DEFAULT, reporter: Progr
                                      f"OCR whole video ({b:.0f}s) at {fps} fps"))
         cands, groups = _scan_for_groups(src, ex, target, a, b, fps, cfg, reporter, occurrence)
         if not groups and window is not None and mode == "hybrid":
-            # the window missed; one more try over the whole video before giving up on OCR
-            reporter.emit(StageEvent("scan", "fallback", "no match in window; scanning whole video"))
-            cands, groups = _scan_for_groups(src, ex, target, 0.0, src.duration_s, cfg.fullscan_fps, cfg,
+            # the window missed; retry a widened window around it (not the whole video) before giving up on OCR
+            r_a = max(0.0, window.start_s - cfg.retry_pad_s)
+            r_b = min(src.duration_s, window.end_s + cfg.retry_pad_s)
+            reporter.emit(StageEvent("scan", "fallback",
+                                     f"no match in window; retrying {r_a:.0f}-{r_b:.0f}s at {cfg.fullscan_fps} fps"))
+            cands, groups = _scan_for_groups(src, ex, target, r_a, r_b, cfg.fullscan_fps, cfg,
                                              reporter, occurrence)
+            if groups:
+                fps = cfg.fullscan_fps
         timings["scan"] = time.perf_counter() - t2
         step = max(1, int(round(src.fps / fps)))
 
