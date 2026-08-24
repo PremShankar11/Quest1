@@ -1,4 +1,4 @@
-from dialogue_finder.matcher import normalize, score_contains, score_similar, best_word_window
+from dialogue_finder.text.matcher import normalize, score_contains, score_similar, best_word_window
 from dialogue_finder.models import Word, format_timestamp
 
 

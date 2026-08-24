@@ -5,7 +5,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend"))
 import cv2  # noqa: E402
 from dialogue_finder.config import DEFAULT  # noqa: E402
-from dialogue_finder.downloader import fetch_video, probe  # noqa: E402
+from dialogue_finder.video.downloader import fetch_video, probe  # noqa: E402
 from dialogue_finder.progress import PrintReporter  # noqa: E402
 
 url = sys.argv[1]

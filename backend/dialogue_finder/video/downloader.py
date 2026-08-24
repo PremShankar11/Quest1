@@ -5,9 +5,9 @@ from pathlib import Path
 
 import cv2
 
-from .config import Config
-from .models import StageEvent, VideoInfo
-from .progress import ProgressReporter
+from ..config import Config
+from ..models import StageEvent, VideoInfo
+from ..progress import ProgressReporter
 
 
 class DownloadError(Exception):
@@ -55,7 +55,7 @@ def fetch_video(url: str, cfg: Config, reporter: ProgressReporter) -> Path:
     except Exception as e:  # yt-dlp raises many types; all are fatal here
         raise DownloadError(f"Could not download video: {str(e).splitlines()[0][:200]}") from e
     if not target.exists():
-        found = list(cfg.cache_dir.glob(f"{cache_key(url)}.*"))
+        found = [f for f in cfg.cache_dir.glob(f"{cache_key(url)}.*") if not f.name.endswith((".part", ".ytdl"))]
         if not found:
             raise DownloadError("Download finished but no file was produced.")
         found[0].rename(target)

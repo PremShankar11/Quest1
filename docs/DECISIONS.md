@@ -52,3 +52,11 @@ Trigger: I stopped implementation and asked whether we had actually compared alt
 
 Result: dependencies dropped — torch, torchvision, easyocr, Node, Next.js, Tailwind, shadcn. Final stack:
 yt-dlp, static-ffmpeg, opencv-python, rapidocr + onnxruntime, faster-whisper, rapidfuzz, fastapi + uvicorn, pytest.
+
+## Phase 1 — Build notes
+
+- **static-ffmpeg download can fail on some networks.** `static_ffmpeg.add_paths()` fetches ffmpeg/ffprobe from
+  GitHub with Python `requests`; on my ISP that connection was reset twice (`ConnectionResetError 10054`) while
+  `curl` to the same URL worked. Workaround used here: download the zip with curl and unpack it into
+  `.venv/Lib/site-packages/static_ffmpeg/bin/win32/`. On a normal network the automatic download works; if it
+  doesn't, the README troubleshooting line points here. The code path is unchanged.

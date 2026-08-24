@@ -4,7 +4,7 @@ import re
 
 from rapidfuzz import fuzz
 
-from .models import Word, Window
+from ..models import Word, Window
 
 _PUNCT = re.compile(r"[^a-z0-9' ]+")
 _SPACES = re.compile(r"\s+")
