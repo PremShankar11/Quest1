@@ -95,7 +95,7 @@ def run(source_spec: str, target: str, *, cfg: Config = DEFAULT, reporter: Progr
     window: Window | None = None
     t1 = time.perf_counter()
     if mode in ("hybrid", "audio"):
-        if locator is None and mode in ("hybrid", "audio"):
+        if locator is None:
             try:
                 from .audio.locator import WhisperLocator
                 locator = WhisperLocator(cfg, reporter)
