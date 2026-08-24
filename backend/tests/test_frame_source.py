@@ -1,5 +1,3 @@
-import numpy as np
-
 from dialogue_finder.video.frame_source import FrameSource
 
 

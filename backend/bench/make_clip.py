@@ -34,8 +34,10 @@ def make_clip(out: Path, *, text: str, appear_s: float, duration_s: float = 15.0
         if i >= appear_frame:
             alpha = 1.0 if fade_frames <= 0 else min(1.0, (i - appear_frame + 1) / fade_frames)
             overlay = frame.copy()
-            cv2.putText(overlay, text, (x, y), font, font_scale, (0, 0, 0), thickness + 3, cv2.LINE_AA)
-            cv2.putText(overlay, text, (x, y), font, font_scale, (255, 255, 255), thickness, cv2.LINE_AA)
+            cv2.putText(overlay, text, (x, y), font, font_scale,
+                        (0, 0, 0), thickness + 3, cv2.LINE_AA)
+            cv2.putText(overlay, text, (x, y), font, font_scale,
+                        (255, 255, 255), thickness, cv2.LINE_AA)
             frame = cv2.addWeighted(overlay, alpha, frame, 1 - alpha, 0)
         writer.write(frame)
     writer.release()

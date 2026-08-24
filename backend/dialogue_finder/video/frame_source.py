@@ -26,31 +26,35 @@ class FrameSource:
         return self.frame_count / self.fps if self.fps else 0.0
 
     def index_for_time(self, t: float) -> int:
-        return max(0, min(self.frame_count - 1, int(round(t * self.fps))))
+        return self._clamp(int(round(t * self.fps)))
 
     def time_for_index(self, i: int) -> float:
         return i / self.fps
+
+    def _clamp(self, index: int) -> int:
+        return max(0, min(self.frame_count - 1, index))
+
+    def _grab_forward(self, count: int) -> None:
+        for _ in range(count):
+            self._cap.grab()
 
     def _seek(self, index: int) -> None:
         if index == self._next_index:
             return
         if 0 <= index - self._next_index <= SEEK_BACK * 2:
-            for _ in range(index - self._next_index):
-                self._cap.grab()
-            self._next_index = index
-            return
-        start = max(0, index - SEEK_BACK)
-        self._cap.set(cv2.CAP_PROP_POS_FRAMES, start)
-        pos = int(self._cap.get(cv2.CAP_PROP_POS_FRAMES))
-        if pos > index:                     # backend overshot; restart from 0
-            self._cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
-            pos = 0
-        for _ in range(index - pos):
-            self._cap.grab()
+            self._grab_forward(index - self._next_index)
+        else:
+            start = max(0, index - SEEK_BACK)
+            self._cap.set(cv2.CAP_PROP_POS_FRAMES, start)
+            pos = int(self._cap.get(cv2.CAP_PROP_POS_FRAMES))
+            if pos > index:                 # backend overshot; restart from 0
+                self._cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                pos = 0
+            self._grab_forward(index - pos)
         self._next_index = index
 
     def frame_at(self, index: int) -> np.ndarray:
-        index = max(0, min(self.frame_count - 1, index))
+        index = self._clamp(index)
         self._seek(index)
         ok, frame = self._cap.read()
         self._next_index = index + 1
