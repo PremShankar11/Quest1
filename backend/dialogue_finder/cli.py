@@ -1,0 +1,54 @@
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from pathlib import Path
+
+from .config import DEFAULT, Config
+from .progress import PrintReporter
+
+
+def build_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(prog="dialogue_finder",
+                                description="Find the first frame where a dialogue appears in a video.")
+    src = p.add_mutually_exclusive_group(required=True)
+    src.add_argument("--url", help="video URL (any yt-dlp supported site)")
+    src.add_argument("--local", help="path to a local video file")
+    p.add_argument("--text", required=True, help='target dialogue, e.g. "My mind rebels at stagnation"')
+    p.add_argument("--mode", choices=["hybrid", "audio", "ocr"], default="hybrid")
+    p.add_argument("--occurrence", choices=["first", "last", "all"], default="first")
+    p.add_argument("--out", default="output", help="output directory (default: output)")
+    p.add_argument("--json", action="store_true", help="also print result.json content to stdout")
+    p.add_argument("--verbose", "-v", action="store_true")
+    return p
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = build_parser()
+    try:
+        args = parser.parse_args(argv)
+    except SystemExit as e:               # argparse exits 2 on usage error
+        return int(e.code) if e.code is not None else 2
+    cfg = Config(output_dir=Path(args.out), cache_dir=DEFAULT.cache_dir)
+    from .pipeline import PipelineError, run
+    try:
+        res = run(args.url or args.local, args.text, cfg=cfg, reporter=PrintReporter(args.verbose),
+                  mode=args.mode, occurrence=args.occurrence, local=args.local is not None)
+    except PipelineError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+    except KeyboardInterrupt:
+        print("Error: interrupted", file=sys.stderr)
+        return 130
+    except Exception as e:                # last line of defence: never a traceback
+        print(f"Error: unexpected failure ({type(e).__name__}: {str(e)[:200]})", file=sys.stderr)
+        return 1
+    print(res.format_block())
+    for alt in res.alternatives:
+        print(f"Also at   : {alt.frame_index} ({alt.timestamp_s:.3f}s) score {alt.score:.2f}")
+    cfg.output_dir.mkdir(parents=True, exist_ok=True)
+    (cfg.output_dir / "result.json").write_text(json.dumps(res.to_dict(), indent=2, default=str), encoding="utf-8")
+    if args.json:
+        print(json.dumps(res.to_dict(), indent=2, default=str))
+    return 0
