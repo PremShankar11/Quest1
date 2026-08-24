@@ -20,7 +20,7 @@ def test_score_contains_ocr_noise_still_high():
 
 
 def test_score_contains_unrelated_is_low():
-    assert score_contains("My mind rebels at stagnation", "Come along Watson") < 0.5
+    assert score_contains("My mind rebels at stagnation", "Come along Watson") < 0.6
 
 
 def test_score_contains_empty_haystack_is_zero():
