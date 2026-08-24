@@ -53,6 +53,68 @@ Trigger: I stopped implementation and asked whether we had actually compared alt
 Result: dependencies dropped — torch, torchvision, easyocr, Node, Next.js, Tailwind, shadcn. Final stack:
 yt-dlp, static-ffmpeg, opencv-python, rapidocr + onnxruntime, faster-whisper, rapidfuzz, fastapi + uvicorn, pytest.
 
+## Phase 3 — Build (Tasks 2-9)
+
+### Task 2 — text matcher
+
+- AI's `normalize()` proposed `replace("'", "'")` — a no-op, same character on both sides.
+  → I changed it to map the curly apostrophe `’` to a straight `'`. → Left as written, dialogue
+  typed with a curly apostrophe would never match a transcript using a straight one, silently.
+- AI's `score_similar` proposed `rapidfuzz.fuzz.token_set_ratio`. → I changed it to
+  `token_sort_ratio`. → `token_set_ratio` returns 1.0 for any subset span (a short phrase entirely
+  contained in a longer one scores as a perfect match), which would pick the wrong audio window;
+  `token_sort_ratio` still tolerates word-order noise from translation without that false-perfect case.
+
+### Task 3 — demo narrative
+
+- AI's plan assumed the given test video would prove the OCR route end-to-end. → I changed the demo
+  narrative once Task 3's frame spike found the video has no burned-in subtitles anywhere: audio is the
+  hero on this video, and OCR is proven separately, on synthetic clips plus a real YouTube clip with
+  burned-in subtitles (Task 9's matrix). → Forcing OCR-only proof onto a video that structurally can't
+  supply it would mean either a faked result or an unproven path; audio-frame precision (≈ ±0.1 s ≈ ±2-3
+  frames, bounded by Whisper word timestamps) is documented as a limit instead — WhisperX forced
+  alignment stays a documented extension, not built now (YAGNI until asked for).
+
+### Task 5 — OCR band preprocessing
+
+- AI's `read_dialogue` prep step converted the subtitle band to grayscale before OCR. → I changed it to
+  keep colour, upscale only. → Measured: grayscale made RapidOCR drop a space ("mindrebels" instead of
+  "mind rebels"); the same band in colour reads the line exactly, confidence 0.98.
+
+### Task 7 — CLI exit codes
+
+- AI's plan text for `cli.main`'s `SystemExit` handling was `int(e.code or 2)`. → I changed it to
+  `int(e.code) if e.code is not None else 2`. → `e.code or 2` turns argparse's `SystemExit(0)` from
+  `--help` into exit code 2 (`0 or 2 == 2`) — wrong; `--help` must exit 0.
+
+### Task 8 — audio locator + hybrid retry
+
+- AI's `_load_model` wrapped `WhisperModel(..., device="cuda")` **construction** in try/except, assuming
+  a CUDA failure surfaces there. → I changed the fallback to wrap the `model.transcribe(...)` call
+  itself, reloading on `device="cpu"` and retrying once on `RuntimeError`. → On this machine
+  `ctranslate2` enumerates a GPU so construction succeeds, but the CUDA runtime DLL (`cublas64_12.dll`)
+  is missing — the failure only surfaces on first inference, past the plan's try/except. Confirmed firing
+  in the real run's log.
+- AI's pipeline retry rule was: OCR misses in the audio window → retry over the **whole video**.
+  → I changed it to retry once over the window widened by `±retry_pad_s` (15 s) at the same
+  `fullscan_fps`, falling back to the audio timestamp if that also misses too; whole-video scan now only
+  fires when no audio window exists at all. → The first real run showed a confident audio match still
+  triggering the ≈65-minute whole-video scan, because this video has no burned-in subtitles at all —
+  pointless. Cost if wrong: a subtitle appearing more than 15 s from the spoken line is missed and falls
+  back to the audio frame (documented limit, docs/APPROACH.md Phase 5).
+- AI's `score_contains` scored any OCR read that fuzzy-matched inside the target as up to 1.0
+  (`rapidfuzz.fuzz.partial_ratio`). → I changed it to scale that score by
+  `coverage = min(1, len(haystack)/len(target))`. → The widened retry surfaced a real false positive:
+  frame 7459 OCR-read a single stray "R" and scored 1.00 against a 29-character target, reporting
+  `source: ocr`, `HIGH` confidence on a frame with no text at all.
+
+### Task 9 — `--mode audio`
+
+- AI's `pipeline.run` only built a `WhisperLocator` when `locator is None and mode == "hybrid"`.
+  → I changed the guard to `mode in ("hybrid", "audio")`. → `--mode audio` with no injected locator
+  silently produced `window=None` and always raised `PipelineError`, even on a video with clear matching
+  speech — audio-only mode was unusable stand-alone before this fix.
+
 ## Phase 1 — Build notes
 
 - **static-ffmpeg download can fail on some networks.** `static_ffmpeg.add_paths()` fetches ffmpeg/ffprobe from

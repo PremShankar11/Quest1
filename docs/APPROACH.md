@@ -22,6 +22,38 @@ title cards render as on-screen text, never spoken dialogue); therefore the expe
 route on this video is audio-fallback.
 
 ## Phase 2 — Design
+
+### Where to look
+
+Transcribe the full audio track with faster-whisper (`base`, `task=translate` so dubbed/foreign audio
+comes back in English), fuzzy-match the target line against the word-level transcript with rapidfuzz
+(`token_sort_ratio`, threshold 0.6), and take a window around the best-scoring span, padded by
+`Config.window_pad_s` (3.0 s). This is a *location* signal, not a frame — it answers "roughly when," not
+"which frame."
+
+### Which frame
+
+Binary search (`first_true`) over the OCR-scanned samples inside the window: OCR score is a monotone-ish
+step from "not yet visible" to "visible," so the exact first frame is found in 3-4 OCR calls between the
+last non-matching sample and the first matching one, instead of scanning every frame.
+
+### How text is extracted
+
+RapidOCR (onnxruntime backend) reads the bottom subtitle band first (`band_fraction=0.35`, upscaled
+`ocr_upscale=2.0`); if that band read comes back empty, the same frame is re-read full-frame (catches
+text outside the bottom band, e.g. `center_position` in the benchmark). The extracted text — whichever
+read produced it — is then compared against the target with `text/matcher.py:score_contains`
+(`rapidfuzz.fuzz.partial_ratio`, scaled by `coverage = min(1, len(haystack)/len(target))` so a single
+stray character can't score as a perfect match — see docs/DECISIONS.md).
+
+### Ambiguity
+
+Two kinds handled explicitly: (1) the same line appears more than once — `--occurrence first|last|all`
+picks which OCR hit to report, all candidates are still recorded in `Result.candidates`; (2) the line
+fades or pops onto screen rather than appearing on one clean frame — `classify_appearance` (Canny edge
+diff between frame *n-1* and *n*) labels the `Previous` evidence pair `pop-in` or `fade-in`, and
+confidence is downgraded to `MEDIUM` for a fade so the label and the confidence agree with each other.
+
 ## Phase 3 — Build
 
 ### Pipeline + CLI (Task 7)
@@ -281,3 +313,44 @@ completed in a few seconds (2.13 MiB and 4.79 MiB), so wall time on the real-vid
 runs is dominated by `whisper base` CPU transcription (60-120 s), not download.
 
 ## Phase 5 — Reflect: limits and extensions
+
+### Measured limits
+
+- **Audio-route precision is bounded by Whisper word timestamps: ≈ ±0.1 s, ≈ ±2-3 frames at 24-30 fps.**
+  When there's no on-screen text to refine against, the reported frame is only as good as the word
+  timestamp faster-whisper assigns to the first spoken word of the match — not frame-exact the way the
+  OCR route is.
+- **Fade-in text: ±1 frame.** Confirmed by the benchmark (`fade_12_frames`, error 1 frame, `MEDIUM`
+  confidence) — "first frame with detectable text" is inherently fuzzy while opacity is still low, and
+  the pipeline reports `MEDIUM` rather than pretending to more precision than the source has.
+- **Subtitles more than `retry_pad_s` (15 s) from the spoken line are missed by OCR and the pipeline
+  falls back to the audio frame.** The widened retry covers `[window.start_s - 15, window.end_s + 15]`
+  once; a subtitle further out than that from where Whisper anchors the line is never scanned, and the
+  result reports `source: audio` / `MEDIUM` instead of `source: ocr` / `HIGH` for that case. Documented
+  trade-off, not a bug — a confident audio match makes a whole-video scan (65 min, see Phase 3) not worth
+  it for the common case.
+- **OCR false positives on short reads are now scaled by coverage, not eliminated.** `score_contains`
+  scales `partial_ratio` by `coverage = min(1, len(haystack)/len(target))`, so a read still needs to
+  cover ≥80% of the target's length to clear the 0.8 match threshold (the stray-"R" false positive from
+  Task 8 now scores 0.04, not 1.00). Residual limit: a subtitle split across two short on-screen lines
+  can still score low unless each line individually covers ≥80% of the target. Not observed in the
+  benchmark or the real-video matrix, but not structurally impossible.
+- **CPU full-scan cost.** Whole-video OCR (only triggered when no audio window exists at all) runs at
+  ≈ 0.6 s/OCR call on this CPU; on the 54-minute test video that's ≈ 65 minutes for a full scan at
+  `fullscan_fps=2.0`. This is why the pipeline prefers to locate via audio first and only fall back to a
+  full scan when there's no transcript match to anchor a window on.
+
+### Extensions not built (out of scope for Plan 1)
+
+- **Hosted/faster ASR** (Groq Whisper API, OpenAI `whisper-1`) — would cut the ≈2-3 min local
+  transcription to seconds, at the cost of a required API key and network dependency; rejected for Plan 1
+  so the tool runs offline after the first download (see docs/DECISIONS.md stack review).
+- **WhisperX forced alignment** — would tighten audio-route precision below the current ±0.1 s/±2-3
+  frame bound; not built because no interviewer feedback has asked for tighter audio precision yet
+  (YAGNI — see ledger ruling, docs/DECISIONS.md).
+- **Multi-language OCR models** — RapidOCR is currently configured for its default (Latin-script/English)
+  model; non-Latin burned-in subtitles would need a different or multi-language model bundle.
+- **Scene detection** — could narrow the whole-video fallback scan to shot boundaries instead of a fixed
+  fps sample; not needed once the audio-first + widened-retry strategy made the whole-video path rare.
+- **Web UI (Plan 2).** Plan 1 is CLI-only by design; the live-progress web interface (FastAPI + static
+  HTML/JS, decided in the stack review) is the next plan, not part of this one.
