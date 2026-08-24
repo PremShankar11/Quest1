@@ -1,0 +1,49 @@
+# prompts.txt — every prompt given to an AI assistant while building this project, in order.
+# Tool: Claude Code (model: Claude Fable 5), plugins: superpowers (brainstorming, writing-plans), advisor.
+# Session 1 — brainstorming (2026-08-24)
+
+[1]
+/superpowers:brainstorming - C:\Users\Asus\Downloads\Problem statement - My mind rebels at stagnation.pdf - So this was the problem statement given to me by a company So I am planning to finish this task but right now let's keep this whole session only for brainstorming. C:\Users\Asus\Downloads\NOtes from the company.txt - So I was present in the pre-placement talk by the company. So this is what notes I took So I think there are very much useful stuff in this like what they like and what constraints are there.   Right now, what I've thought of is this workflow, but I know that like my brain is pretty disorganized, and I don't know if I'm going in the right path. You're obviously a better model, and you think about this and see if I'm right. But I think there is a much better way of doing this - Inputs:
+
+1. Video URL
+2. Target dialogue
+   Example: "My mind rebels at stagnation"
+
+We will interpret "on-screen dialogue" as the dialogue associated with the actors visible in the video — i.e., we want to identify when the actors speak the target dialogue and locate the corresponding video frame.
+
+So that's probably gonna be like a million questions that arise like how are we gonna get the video from my URL and how are we gonna like extract the audio from it and transcribe it or like whatever approach that you want to take that we can take the the thing is in this brainstorming session I want us to come up with a clear idea of what we are gonna do and like like what approach we are gonna take and how we are gonna do things like how are we gonna get the video like how are we gonna like build I want us to think about like the whole architecture and the whole pipeline of this entire pipeline. So, this whole thing is just to help me think of everything and help me get my brain sorted and to come up with a good plan of what we are gonna do, and for me to have a clear idea and answer: like, like when I did thinking of myself, I had like 20 different questions like of what I'm gonna do. I want you to think of more than 20, 30, more than every questions, like how muchever you can, and then like discuss with me, and we can go back and forth, and we can see what we can do. And I'm kind of a beginner to this whole transcribing audio and this whole thing. So, you will be helping me with recommending stuff and helping me use my brain and choose the best option available
+
+[2]
+So yeah, that's the problem. We don't know what on-screen dialogue actually means like I don't know what they meant. So like it could be like you know embedded burnt in a subtitle on the screen like a text on the video itself or it may be like a person actually talking a dialogue I don't know like what do you think after analyzing the problem statement given in the PDF that I gave you what do you think they want and even if we are making a program or a product for that what approach do you think will satisfy all of the doubts that we have
+
+[3]
+Okay, let's say that the burnt and subtitle is for like translating a language. So let's say that in the Godfather he says something in Italian and they want us to know that what was said in Italian to English. So they burnt in a subtitle of whatever they're speaking in the video. So with your approach like when we transcribe the whole movie and we see the transcribed audio text and then we try to locate what was said in English that Italian translated thing it we can't find it because like originally the audio transcribing thing it'll be it will not be there right it will be in Italian right so what are we gonna do about that. Also like what if like it's just that like let's say the godfather is worried in the subtitle like the burnt subtitle but he never says anything right like like the dialogue where it's not spoken but it's just shown on the screen what are we gonna do about that
+
+[4]
+Okay, but don't you think this hybrid approach will take like a lot of time
+
+[5]
+Okay, can you use the advisor and ask it whatever is good like can you ask like general advice of whatever you're doing is okay or is it gonna push back ask it is there any pushbacks that are needed
+
+[6] (answers to the assistant's questions)
+VPN: ok.ru not Being able to reach was because of my internet problem until about that like my internet out that time
+Interface: Wonderful UA with Next.js and pretty much a really pretty UI with use all the fend and skills that is needed for that and the interviewer should be able to give like a URL and the whole pipeline should you know just work like in front of them like all the visuals of what's happening and with like in the loading screen and all it should show and everything I want it like that not only this one
+
+[7] (answers to the assistant's questions)
+Hosting: Runs locally, one start script
+Deadline: Within 3 days
+
+[8]
+give this plan to the advisor and ask what changes can be done.. don't worry about the time. consider u have like 10 days
+
+[9]
+Can you make, like, a small architecture diagram of whatever we are building? and give it to me... show it to me, like, like, a simple one, but with a lot of details. use whatever tool u want to draw
+
+[10]
+Okay, so I like the approach. The plan is fine. Okay, here's a problem, right? So, like, all my competitions, everyone is gonna use claude to finish this task. So, everyone's claude is gonna give the exact same approach, and like you know, what's very much similar approaches of what's gonna be done right? So, how are you the best claude that is compared to around 100 other cloths of other competitors like other students that are doing this task? What do you think you can do that no other plot could ever think of that would impress the interviewer that he just so he sees it and just takes me in for a job like figure it out what it is, think of it like think what can be done on this thing to help me be different and be much better and have like a unique selling point that no one else or no one claude thought of it
+
+[11]
+Okay, so without making the whole thing very much complex and hard for me to explain to the interviewer, like whatever thing you can fit into the plan, you put it into the plan
+
+[12]
+Okay, so why not we do it in the same session? I put it in the bypass permissions on. So, yeah, let's go on and start implementing it. But what I want you to do is follow the plan and like cover often, like have a local gate itself file. It's not put into GitHub right now. Let's have a local git. Okay, okay, what do you think? I just typed superpowers writing plans here itself and we just go on here. Shall I do that?

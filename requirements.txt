@@ -1,0 +1,10 @@
+yt-dlp==2026.8.19
+static-ffmpeg==3.0
+opencv-python==5.0.0.93
+numpy>=2.0
+rapidfuzz==3.14.5
+easyocr==1.7.2
+torch==2.13.0
+torchvision==0.28.0
+faster-whisper==1.2.1
+pytest==8.4.1
