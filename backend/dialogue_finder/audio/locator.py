@@ -30,38 +30,42 @@ def extract_audio(video: Path, wav: Path) -> Path:
     return wav
 
 
-def _load_model(name: str):
+def _load_model(name: str, device: str = "cuda"):
     from faster_whisper import WhisperModel
-    try:
-        return WhisperModel(name, device="cuda", compute_type="float16"), "cuda"
-    except Exception:
-        return WhisperModel(name, device="cpu", compute_type="int8"), "cpu"
+    if device == "cuda":
+        try:
+            return WhisperModel(name, device="cuda", compute_type="float16"), "cuda"
+        except Exception:
+            device = "cpu"
+    return WhisperModel(name, device="cpu", compute_type="int8"), "cpu"
 
 
 def transcribe_words(wav: Path, model_name: str, task: str, reporter: ProgressReporter) -> list[Word]:
-    from faster_whisper import WhisperModel
+    def run(model):
+        return model.transcribe(str(wav), task=task, word_timestamps=True, vad_filter=True)
+
     model, device = _load_model(model_name)
     reporter.emit(StageEvent("transcribe", "running", f"whisper {model_name} on {device}", 0.0))
     try:
-        segments, info = model.transcribe(str(wav), task=task, word_timestamps=True, vad_filter=True)
+        segments, info = run(model)
     except RuntimeError:
         # CUDA runtime libs (e.g. cublas) can be missing even though a GPU is detected;
         # that failure only surfaces on first inference, not at WhisperModel() construction,
         # so _load_model()'s try/except can't catch it. Fall back to CPU here instead.
         if device != "cuda":
             raise
-        model, device = WhisperModel(model_name, device="cpu", compute_type="int8"), "cpu"
+        model, device = _load_model(model_name, device="cpu")
         reporter.emit(StageEvent("transcribe", "fallback", f"cuda unavailable, retrying whisper {model_name} on {device}", 0.0))
-        segments, info = model.transcribe(str(wav), task=task, word_timestamps=True, vad_filter=True)
+        segments, info = run(model)
     words: list[Word] = []
-    total = getattr(info, "duration", 0) or 0
+    total = info.duration
     for seg in segments:
         for w in (seg.words or []):
             words.append(Word(w.word.strip(), float(w.start), float(w.end)))
         reporter.emit(StageEvent("transcribe", "running", seg.text.strip()[:80],
                                  (seg.end / total) if total else None,
                                  {"start": seg.start, "end": seg.end, "text": seg.text.strip()}))
-    reporter.emit(StageEvent("transcribe", "ok", f"{len(words)} words, language {getattr(info, 'language', '?')}", 1.0))
+    reporter.emit(StageEvent("transcribe", "ok", f"{len(words)} words, language {info.language}", 1.0))
     return words
 
 
