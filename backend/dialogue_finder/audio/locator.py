@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 from pathlib import Path
 from typing import Protocol
@@ -40,23 +41,31 @@ def _load_model(name: str, device: str = "cuda"):
     return WhisperModel(name, device="cpu", compute_type="int8"), "cpu"
 
 
-def transcribe_words(wav: Path, model_name: str, task: str, reporter: ProgressReporter) -> list[Word]:
-    def run(model):
-        return model.transcribe(str(wav), task=task, word_timestamps=True, vad_filter=True)
+def _looks_like_cuda_error(e: Exception) -> bool:
+    msg = str(e).lower()
+    return any(tok in msg for tok in ("cuda", "cublas", "cudnn", "gpu"))
 
-    model, device = _load_model(model_name)
+
+def _transcribe_all(model, wav: Path, task: str):
+    segments, info = model.transcribe(str(wav), task=task, word_timestamps=True, vad_filter=True)
+    return list(segments), info          # force the lazy generator inside the try
+
+
+def transcribe_words(wav: Path, model_name: str, task: str, reporter: ProgressReporter) -> list[Word]:
+    model, device = _load_model(model_name, "cuda")
     reporter.emit(StageEvent("transcribe", "running", f"whisper {model_name} on {device}", 0.0))
     try:
-        segments, info = run(model)
-    except RuntimeError:
-        # CUDA runtime libs (e.g. cublas) can be missing even though a GPU is detected;
-        # that failure only surfaces on first inference, not at WhisperModel() construction,
-        # so _load_model()'s try/except can't catch it. Fall back to CPU here instead.
-        if device != "cuda":
+        segments, info = _transcribe_all(model, wav, task)
+    except Exception as e:
+        # CUDA runtime libs (e.g. cublas) can be missing even though a GPU is detected; that
+        # failure can surface anywhere during transcription (construction, language detection,
+        # or mid-generator), not just at WhisperModel() construction, so it must be caught
+        # around the fully-materialised transcription, not just the constructor.
+        if not _looks_like_cuda_error(e):
             raise
-        model, device = _load_model(model_name, device="cpu")
-        reporter.emit(StageEvent("transcribe", "fallback", f"cuda unavailable, retrying whisper {model_name} on {device}", 0.0))
-        segments, info = run(model)
+        reporter.emit(StageEvent("transcribe", "running", f"cuda unavailable ({type(e).__name__}); using cpu"))
+        model, device = _load_model(model_name, "cpu")
+        segments, info = _transcribe_all(model, wav, task)
     words: list[Word] = []
     total = info.duration
     for seg in segments:
@@ -82,7 +91,9 @@ class WhisperLocator:
         wav = extract_audio(video, self.cfg.cache_dir / f"{video.stem}.16k.wav")
         words = transcribe_words(wav, self.cfg.whisper_model, self.cfg.whisper_task, self.reporter)
         cache.parent.mkdir(parents=True, exist_ok=True)
-        cache.write_text(json.dumps([w.__dict__ for w in words]), encoding="utf-8")
+        tmp = cache.with_suffix(".tmp")
+        tmp.write_text(json.dumps([w.__dict__ for w in words]), encoding="utf-8")
+        os.replace(tmp, cache)
         return words
 
     def locate(self, video: Path, target: str) -> Window | None:

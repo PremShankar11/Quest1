@@ -31,3 +31,57 @@ def test_transcribe_real_audio_smoke(tmp_path):
                    check=True, capture_output=True)
     words = transcribe_words(wav, "base", "translate", NullReporter())
     assert isinstance(words, list)
+
+
+class _FakeWord:
+    def __init__(self, word, start, end):
+        self.word, self.start, self.end = word, start, end
+
+
+class _FakeSegment:
+    def __init__(self, words, text, start, end):
+        self.words, self.text, self.start, self.end = words, text, start, end
+
+
+class _FakeInfo:
+    def __init__(self, duration=0.5, language="en"):
+        self.duration, self.language = duration, language
+
+
+class _FakeModelCudaFails:
+    """Raises a CUDA-flavoured error, whatever device string it was constructed for."""
+    def __init__(self, message):
+        self._message = message
+
+    def transcribe(self, wav, task, word_timestamps, vad_filter):
+        raise RuntimeError(self._message)
+
+
+class _FakeModelCpuOk:
+    def transcribe(self, wav, task, word_timestamps, vad_filter):
+        seg = _FakeSegment([_FakeWord(" hello", 0.0, 0.5)], " hello", 0.0, 0.5)
+        return iter([seg]), _FakeInfo()
+
+
+def test_cuda_error_falls_back_to_cpu(monkeypatch, tmp_path):
+    import dialogue_finder.audio.locator as locator_mod
+
+    def fake_load_model(name, device="cuda"):
+        if device == "cuda":
+            return _FakeModelCudaFails("CUDA failed with error ... cublas64_12.dll"), "cuda"
+        return _FakeModelCpuOk(), "cpu"
+
+    monkeypatch.setattr(locator_mod, "_load_model", fake_load_model)
+    words = locator_mod.transcribe_words(tmp_path / "x.wav", "base", "translate", NullReporter())
+    assert words == [locator_mod.Word("hello", 0.0, 0.5)]
+
+
+def test_non_cuda_error_propagates(monkeypatch, tmp_path):
+    import dialogue_finder.audio.locator as locator_mod
+
+    def fake_load_model(name, device="cuda"):
+        return _FakeModelCudaFails("bad file"), device
+
+    monkeypatch.setattr(locator_mod, "_load_model", fake_load_model)
+    with pytest.raises(RuntimeError):
+        locator_mod.transcribe_words(tmp_path / "x.wav", "base", "translate", NullReporter())
