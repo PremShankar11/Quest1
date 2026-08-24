@@ -47,3 +47,19 @@ Okay, so without making the whole thing very much complex and hard for me to exp
 
 [12]
 Okay, so why not we do it in the same session? I put it in the bypass permissions on. So, yeah, let's go on and start implementing it. But what I want you to do is follow the plan and like cover often, like have a local gate itself file. It's not put into GitHub right now. Let's have a local git. Okay, okay, what do you think? I just typed superpowers writing plans here itself and we just go on here. Shall I do that?
+
+# Session 2 — implementation (2026-08-24), same Claude Code session continued
+
+[13]
+go on
+
+[14]
+i changed my internet - so see whatys worng and make it go on
+
+[15]
+Okay, so I want you to like justify the tech stack like why are we using whisper and like did we even think of any alternatives that would you know make this a whole lot better like existing tools that would you know help us do this job like we didn't even do that right so can we research more on can we stop everything and like can we research more on what alternatives are there what tools we could use what open source stuff was there like or what like where I can get you know maybe some platforms where I can get some API keys and give it to you and you can use that platform and you know do this task I think we are just blindly running this part but I don't know if it's like the best one I'm not sure if what we chose is like the best architecture out that for this taskAnd also, when choosing for the tech stack and the architecture, I want you to be minimalistic. Like, if you can do one, like the front-end, we don't have much to do at the front end. We basically have only one input button. And so, if HTML is enough to HTML and basic JavaScript is enough to build that button, then we don't need to go for the Next.js or any complex front-end architectures. So, if we can do something with some low complexity or lightweight libraries and technical stuffs, then we should do it that way. So make sure we are following this principle or something
+
+[16] (answers to the assistant's questions)
+OCR engine: RapidOCR
+Audio locator: Local faster-whisper only
+Web UI: FastAPI + static HTML/JS

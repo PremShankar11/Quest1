@@ -4,9 +4,9 @@
 
 **Goal:** A Python CLI that takes a video URL (or local file) and a target dialogue, and prints the timestamp, 0-based frame number, extracted text, confidence, and saves the frame image (plus the frame before it) — never crashing.
 
-**Architecture:** `pipeline.run()` downloads with yt-dlp, asks `audio_locator` (faster-whisper, translate task) for a ~10 s window, runs `scanner` (EasyOCR on the subtitle band at 5 fps in the window, 2 fps whole-video fallback), then `refiner` binary-searches OCR score between the last non-matching sample and the first matching sample to pin the exact first frame. Every stage reports through a `ProgressReporter`; every stage has a fallback so a `Result` is always produced.
+**Architecture:** `pipeline.run()` downloads with yt-dlp, asks `audio_locator` (faster-whisper, translate task) for a ~10 s window, runs `scanner` (RapidOCR on the subtitle band at 5 fps in the window, 2 fps whole-video fallback), then `refiner` binary-searches OCR score between the last non-matching sample and the first matching sample to pin the exact first frame. Every stage reports through a `ProgressReporter`; every stage has a fallback so a `Result` is always produced.
 
-**Tech Stack:** Python 3.14 (`py`), yt-dlp, static-ffmpeg, opencv-python, easyocr (+torch), faster-whisper, rapidfuzz, pytest. Windows 11, Git Bash for commands.
+**Tech Stack:** Python 3.14 (`py`), yt-dlp, static-ffmpeg, opencv-python, rapidocr (onnxruntime, no torch), faster-whisper, rapidfuzz, pytest. Web layer (Plan 2): FastAPI + one static index.html (vanilla JS, EventSource) — no Node. Windows 11, Git Bash for commands.
 
 **Spec:** `C:\Users\Asus\.claude\plans\superpowers-brainstorming-c-users-asus-dapper-crystal.md` (approved 2026-08-24). Plan 2 (FastAPI + Next.js UI) and Plan 3 (docs + final validation) come after this plan.
 
@@ -20,7 +20,8 @@
 - The CLI must never print a traceback: fatal errors → one line on stderr, exit code 1.
 - Thresholds live only in `backend/dialogue_finder/config.py`: audio window ≥ 0.6, OCR match ≥ 0.8, window pad 3 s, 5 fps in-window, 2 fps whole video, band = bottom 35 %, OCR upscale 2×, Whisper `base` + `translate`, download ≤ 480p.
 - Test video: `https://ok.ru/video/248244667877` (54 min, 24 fps, 960×720). Target: `My mind rebels at stagnation`.
-- Don't build: multi-language OCR, scene detection, Docker, hosting, LLM-vision OCR.
+- Don't build: multi-language OCR, scene detection, Docker, hosting, LLM-vision OCR, Next.js/Node frontend.
+- Stack ruling (2026-08-24, after alternatives research): OCR = RapidOCR (measured: 0.5 s load, exact read; EasyOCR 54 s load, torch 200 MB). Locator = local faster-whisper only. UI = FastAPI + static HTML. torch/torchvision/easyocr removed from requirements.
 
 ---
 
@@ -46,7 +47,7 @@ Quest1/
       matcher.py                # normalize, score_contains, score_similar, best_word_window
       downloader.py             # ensure_ffmpeg, cache_key, fetch_video, DownloadError
       frame_source.py           # FrameSource (cv2), index<->time helpers, format_timestamp
-      ocr.py                    # TextExtractor protocol, EasyOCRExtractor, crop_band, prep, read_dialogue
+      ocr.py                    # TextExtractor protocol, RapidOCRExtractor, crop_band, prep, read_dialogue
       scanner.py                # coarse_scan, group_hits, pick_group
       refiner.py                # first_true (binary search), refine_first_frame, classify_appearance
       audio_locator.py          # Locator protocol, WhisperLocator, extract_audio, transcribe_words
@@ -185,6 +186,19 @@ Status: Plan 1 (pipeline + CLI) in progress. See docs/APPROACH.md and docs/DECIS
 ```bash
 cd /c/Users/Asus/Quest1 && mkdir -p backend/dialogue_finder backend/tests backend/bench scripts && touch backend/dialogue_finder/__init__.py backend/tests/__init__.py backend/bench/__init__.py scripts/.gitkeep && git add -A && git commit -m "chore: scaffold repo, env, prompts log, docs skeletons"
 ```
+
+---
+
+### Task 1b: stack change after alternatives research (supersedes Task 1's OCR/torch choice)
+
+**Files:**
+- Modify: `requirements.txt`, `docs/DECISIONS.md`, `prompts.txt`, `.gitignore`
+
+- [ ] **Step 1: requirements.txt** — remove `easyocr==1.7.2`, `torch==2.13.0`, `torchvision==0.28.0`; add `rapidocr==3.9.2` and `onnxruntime==1.29.0`. Then `cd /c/Users/Asus/Quest1 && .venv/Scripts/python -m pip uninstall -y easyocr torch torchvision && .venv/Scripts/python -m pip install -r requirements.txt` and verify `.venv/Scripts/python -c "from rapidocr import RapidOCR; import faster_whisper, cv2; print('ok')"`.
+- [ ] **Step 2: .gitignore** — replace the `.easyocr/` line with `bench_out/` if not already present (it is), nothing else.
+- [ ] **Step 3: docs/DECISIONS.md** — append under a new heading `## Phase 1 — Stack review (2026-08-24)` the alternatives-considered log exactly as given in the dispatch (OCR, locator, UI, end-to-end APIs; measured numbers).
+- [ ] **Step 4: prompts.txt** — append the prompts given in the dispatch verbatim under `# Session 2 — implementation (2026-08-24)`.
+- [ ] **Step 5: commit** — `git add -A && git commit -m "chore: switch OCR to RapidOCR, drop torch; record alternatives considered"`.
 
 ---
 
@@ -872,9 +886,9 @@ cd /c/Users/Asus/Quest1 && git add -A && git commit -m "feat: synthetic clip gen
 - Test: `backend/tests/test_ocr.py`
 
 **Interfaces:**
-- Produces: `class TextExtractor(Protocol): read(image: np.ndarray) -> str`; `class EasyOCRExtractor(languages=("en",), gpu: bool | None = None)`; `crop_band(image, fraction)->np.ndarray`; `prep(image, upscale)->np.ndarray`; `read_dialogue(extractor, frame, cfg)->str` (band first, full frame if band is empty).
+- Produces: `class TextExtractor(Protocol): read(image: np.ndarray) -> str`; `class RapidOCRExtractor()`; `crop_band(image, fraction)->np.ndarray`; `prep(image, upscale)->np.ndarray`; `read_dialogue(extractor, frame, cfg)->str` (band first, full frame if band is empty).
 
-- [ ] **Step 1: write failing test (marked slow: first run downloads the EasyOCR model ≈ 100 MB)**
+- [ ] **Step 1: write failing test (marked slow: first run downloads RapidOCR models ≈ 10 MB — already cached from the spike)**
 
 `backend/tests/test_ocr.py`:
 ```python
@@ -900,13 +914,13 @@ def test_prep_upscales_to_gray():
 
 
 @pytest.mark.slow
-def test_easyocr_reads_synthetic_subtitle(synthetic_clip):
-    from dialogue_finder.ocr import EasyOCRExtractor
+def test_rapidocr_reads_synthetic_subtitle(synthetic_clip):
+    from dialogue_finder.ocr import RapidOCRExtractor
     path, truth = synthetic_clip
     with FrameSource(path) as src:
         frame = src.frame_at(truth["frame"] + 5)
         blank = src.frame_at(truth["frame"] - 5)
-    ex = EasyOCRExtractor()
+    ex = RapidOCRExtractor()
     text = read_dialogue(ex, frame, DEFAULT)
     assert score_contains(truth["text"], text) >= 0.8, text
     assert score_contains(truth["text"], read_dialogue(ex, blank, DEFAULT)) < 0.5
@@ -956,32 +970,29 @@ def prep(image: np.ndarray, upscale: float) -> np.ndarray:
     return gray
 
 
-class EasyOCRExtractor:
-    """EasyOCR wrapper. Model loads lazily on first read (slow once, then cached in memory)."""
+class RapidOCRExtractor:
+    """RapidOCR (onnxruntime) wrapper. Engine loads lazily on first read (~0.5 s), models cached on disk."""
 
-    def __init__(self, languages: tuple[str, ...] = ("en",), gpu: bool | None = None) -> None:
-        self.languages = list(languages)
-        self.gpu = gpu
-        self._reader = None
+    def __init__(self, min_score: float = 0.2) -> None:
+        self.min_score = min_score
+        self._engine = None
 
     def _get(self):
-        if self._reader is None:
-            import easyocr
-            gpu = self.gpu
-            if gpu is None:
-                try:
-                    import torch
-                    gpu = bool(torch.cuda.is_available())
-                except Exception:
-                    gpu = False
-            self._reader = easyocr.Reader(self.languages, gpu=gpu, verbose=False)
-        return self._reader
+        if self._engine is None:
+            from rapidocr import RapidOCR
+            self._engine = RapidOCR()
+        return self._engine
 
     def read(self, image: np.ndarray) -> str:
-        results = self._get().readtext(image, detail=1, paragraph=False)
-        # results: [(bbox, text, conf), ...]; sort top-to-bottom then left-to-right
-        results.sort(key=lambda r: (round(r[0][0][1] / 20), r[0][0][0]))
-        return " ".join(r[1] for r in results if r[2] >= 0.2)
+        if image.ndim == 2:
+            image = cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
+        out = self._get()(image)
+        if out is None or not out.txts:
+            return ""
+        # out.boxes: (n, 4, 2) points; sort rows top-to-bottom, then left-to-right
+        items = list(zip(out.boxes, out.txts, out.scores))
+        items.sort(key=lambda r: (round(float(r[0][0][1]) / 20), float(r[0][0][0])))
+        return " ".join(t for _, t, s in items if float(s) >= self.min_score)
 
 
 def read_dialogue(extractor: TextExtractor, frame: np.ndarray, cfg: Config) -> str:
@@ -991,20 +1002,7 @@ def read_dialogue(extractor: TextExtractor, frame: np.ndarray, cfg: Config) -> s
     return extractor.read(prep(frame, 1.0))
 ```
 
-If EasyOCR could not be installed (Task 1 Step 5), use this drop-in instead and name it the same in `pipeline.py`:
-```python
-class RapidOCRExtractor:
-    def __init__(self) -> None:
-        from rapidocr_onnxruntime import RapidOCR
-        self._ocr = RapidOCR()
-
-    def read(self, image: np.ndarray) -> str:
-        result, _ = self._ocr(image)
-        if not result:
-            return ""
-        result.sort(key=lambda r: (round(r[0][0][1] / 20), r[0][0][0]))
-        return " ".join(r[1] for r in result)
-```
+Verified API (rapidocr 3.9.2, spike 2026-08-24): `RapidOCR()(bgr_ndarray)` returns an object with `.txts` (tuple[str]), `.boxes` (array n×4×2), `.scores` (tuple[float]); returns `.txts == None`/empty when nothing is found.
 
 - [ ] **Step 4: run tests (slow one included)**
 
@@ -1369,8 +1367,8 @@ def _save_frames(src: FrameSource, index: int, cfg: Config) -> tuple[str, str]:
 
 
 def _default_extractor():
-    from .ocr import EasyOCRExtractor
-    return EasyOCRExtractor()
+    from .ocr import RapidOCRExtractor
+    return RapidOCRExtractor()
 
 
 def run(source_spec: str, target: str, *, cfg: Config = DEFAULT, reporter: ProgressReporter | None = None,
@@ -1791,7 +1789,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from bench.make_clip import make_clip  # noqa: E402
 from dialogue_finder.config import Config  # noqa: E402
-from dialogue_finder.ocr import EasyOCRExtractor  # noqa: E402
+from dialogue_finder.ocr import RapidOCRExtractor  # noqa: E402
 from dialogue_finder.pipeline import run  # noqa: E402
 
 TEXT = "My mind rebels at stagnation"
@@ -1809,7 +1807,7 @@ VARIANTS = {
 
 def main() -> None:
     out_dir = Path("bench_out"); out_dir.mkdir(exist_ok=True)
-    ex = EasyOCRExtractor()
+    ex = RapidOCRExtractor()
     rows = []
     for name, kw in VARIANTS.items():
         clip = out_dir / f"{name}.mp4"
@@ -1879,7 +1877,7 @@ Measured times: see docs/APPROACH.md Phase 3. GPU is optional (auto-detected).
 
 ## How it works (one paragraph)
 Audio says *where* (Whisper transcript, fuzzy-matched → ~10 s window), OCR says *which second*
-(EasyOCR on the subtitle band at 5 fps), binary search says *which frame* (OCR score between the last
+(RapidOCR on the subtitle band at 5 fps), binary search says *which frame* (OCR score between the last
 non-matching and first matching sample). No audio match → whole-video OCR at 2 fps. No OCR match → frame
 at the first spoken word, with the transcript words as the text. Always produces a result; never a traceback.
 

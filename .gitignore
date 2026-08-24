@@ -10,6 +10,5 @@ bench_out/
 *.wav
 *.png
 !docs/**/*.png
-.easyocr/
 node_modules/
 .next/
