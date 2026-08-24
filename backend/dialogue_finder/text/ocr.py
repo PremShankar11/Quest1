@@ -32,7 +32,7 @@ class RapidOCRExtractor:
         self.min_score = min_score
         self._engine = None
 
-    def _get(self):
+    def _load_engine(self):
         if self._engine is None:
             import logging
             logging.getLogger("RapidOCR").setLevel(logging.WARNING)
@@ -43,13 +43,19 @@ class RapidOCRExtractor:
     def read(self, image: np.ndarray) -> str:
         if image.ndim == 2:
             image = cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
-        out = self._get()(image)
+        out = self._load_engine()(image)
         if out is None or not out.txts:
             return ""
-        # out.boxes: (n, 4, 2) points; sort rows top-to-bottom, then left-to-right
         items = list(zip(out.boxes, out.txts, out.scores))
-        items.sort(key=lambda r: (round(float(r[0][0][1]) / 20), float(r[0][0][0])))
+        items.sort(key=_top_to_bottom_left_to_right)
         return " ".join(t for _, t, s in items if float(s) >= self.min_score)
+
+
+def _top_to_bottom_left_to_right(detection: tuple) -> tuple[int, float]:
+    """Sort key for (box, text, score) triples: box is (4, 2) points; row-bucket by y, then order by x."""
+    box, _text, _score = detection
+    x, y = box[0]
+    return (round(float(y) / 20), float(x))
 
 
 def read_dialogue(extractor: TextExtractor, frame: np.ndarray, cfg: Config) -> str:
