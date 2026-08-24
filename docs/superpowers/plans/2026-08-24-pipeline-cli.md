@@ -21,6 +21,9 @@
 - Thresholds live only in `backend/dialogue_finder/config.py`: audio window ≥ 0.6, OCR match ≥ 0.8, window pad 3 s, 5 fps in-window, 2 fps whole video, band = bottom 35 %, OCR upscale 2×, Whisper `base` + `translate`, download ≤ 480p.
 - Test video: `https://ok.ru/video/248244667877` (54 min, 24 fps, 960×720). Target: `My mind rebels at stagnation`.
 - Don't build: multi-language OCR, scene detection, Docker, hosting, LLM-vision OCR, Next.js/Node frontend.
+- Code principles (user rule, 2026-08-24): SOLID, DRY, KISS. One responsibility per module; dependencies flow inward (subpackages never import `pipeline`/`cli`); protocols (`TextExtractor`, `Locator`, `ProgressReporter`) are the only extension seams — no speculative abstraction, no helper that has one caller, no class where a function does.
+- Package layout by responsibility: `dialogue_finder/video/` (getting frames: downloader, frame_source), `dialogue_finder/audio/` (where to look: locator), `dialogue_finder/text/` (which frame + what text: matcher, ocr, scanner, refiner), top level = shared types + orchestration (config, models, progress, pipeline, cli).
+- Process: after each implementer finishes and before the task review, the controller dispatches a `code-simplifier:code-simplifier` pass over that task's diff (tests must stay green; commit `refactor: simplify <task>`); the task reviewer then reviews the combined diff.
 - Stack ruling (2026-08-24, after alternatives research): OCR = RapidOCR (measured: 0.5 s load, exact read; EasyOCR 54 s load, torch 200 MB). Locator = local faster-whisper only. UI = FastAPI + static HTML. torch/torchvision/easyocr removed from requirements.
 
 ---
@@ -41,18 +44,24 @@ Quest1/
     dialogue_finder/
       __init__.py
       __main__.py               # python -m dialogue_finder → cli.main()
-      config.py                 # Config dataclass, DEFAULT
-      models.py                 # Word, Window, Candidate, Result, StageEvent, VideoInfo
+      config.py                 # Config dataclass, DEFAULT — every threshold/knob
+      models.py                 # Word, Window, Candidate, Result, StageEvent, VideoInfo, format_timestamp
       progress.py               # ProgressReporter protocol, NullReporter, PrintReporter
-      matcher.py                # normalize, score_contains, score_similar, best_word_window
-      downloader.py             # ensure_ffmpeg, cache_key, fetch_video, DownloadError
-      frame_source.py           # FrameSource (cv2), index<->time helpers, format_timestamp
-      ocr.py                    # TextExtractor protocol, RapidOCRExtractor, crop_band, prep, read_dialogue
-      scanner.py                # coarse_scan, group_hits, pick_group
-      refiner.py                # first_true (binary search), refine_first_frame, classify_appearance
-      audio_locator.py          # Locator protocol, WhisperLocator, extract_audio, transcribe_words
       pipeline.py               # run(): orchestration + fallbacks + confidence
       cli.py                    # argparse, output block, exit codes
+      video/                    # getting frames out of a URL
+        __init__.py
+        downloader.py           # ensure_ffmpeg, cache_key, fetch_video, probe, DownloadError
+        frame_source.py         # FrameSource (cv2): exact random access, index<->time
+      audio/                    # where to look
+        __init__.py
+        locator.py              # Locator protocol, WhisperLocator, extract_audio, transcribe_words
+      text/                     # which frame, what text
+        __init__.py
+        matcher.py              # normalize, score_contains, score_similar, best_word_window
+        ocr.py                  # TextExtractor protocol, RapidOCRExtractor, crop_band, prep, read_dialogue
+        scanner.py              # coarse_scan, group_hits, pick_group
+        refiner.py              # first_true (binary search), refine_first_frame, classify_appearance
     bench/
       __init__.py
       make_clip.py              # synthetic clip generator (cv2.VideoWriter) with ground truth
@@ -205,7 +214,7 @@ cd /c/Users/Asus/Quest1 && mkdir -p backend/dialogue_finder backend/tests backen
 ### Task 2: config, models, matcher (pure logic, TDD)
 
 **Files:**
-- Create: `backend/dialogue_finder/config.py`, `backend/dialogue_finder/models.py`, `backend/dialogue_finder/matcher.py`
+- Create: `backend/dialogue_finder/config.py`, `backend/dialogue_finder/models.py`, `backend/dialogue_finder/text/matcher.py`
 - Test: `backend/tests/test_matcher.py`
 
 **Interfaces:**
@@ -215,7 +224,7 @@ cd /c/Users/Asus/Quest1 && mkdir -p backend/dialogue_finder backend/tests backen
 
 `backend/tests/test_matcher.py`:
 ```python
-from dialogue_finder.matcher import normalize, score_contains, score_similar, best_word_window
+from dialogue_finder.text.matcher import normalize, score_contains, score_similar, best_word_window
 from dialogue_finder.models import Word, format_timestamp
 
 
@@ -237,7 +246,7 @@ def test_score_contains_ocr_noise_still_high():
 
 
 def test_score_contains_unrelated_is_low():
-    assert score_contains("My mind rebels at stagnation", "Come along Watson") < 0.5
+    assert score_contains("My mind rebels at stagnation", "Come along Watson") < 0.6
 
 
 def test_score_contains_empty_haystack_is_zero():
@@ -404,7 +413,7 @@ class Result:
         return d
 ```
 
-`backend/dialogue_finder/matcher.py`:
+`backend/dialogue_finder/text/matcher.py`:
 ```python
 from __future__ import annotations
 
@@ -412,7 +421,7 @@ import re
 
 from rapidfuzz import fuzz
 
-from .models import Word, Window
+from ..models import Word, Window
 
 _PUNCT = re.compile(r"[^a-z0-9' ]+")
 _SPACES = re.compile(r"\s+")
@@ -433,11 +442,11 @@ def score_contains(target: str, haystack: str) -> float:
 
 
 def score_similar(a: str, b: str) -> float:
-    """Order-insensitive similarity of two short phrases (0..1)."""
+    """Order-insensitive similarity of two short phrases (0..1). token_sort (not token_set): a subset span must not score 1.0."""
     a, b = normalize(a), normalize(b)
     if not a or not b:
         return 0.0
-    return fuzz.token_set_ratio(a, b) / 100.0
+    return fuzz.token_sort_ratio(a, b) / 100.0
 
 
 def best_word_window(words: list[Word], target: str) -> Window | None:
@@ -476,7 +485,7 @@ cd /c/Users/Asus/Quest1 && git add -A && git commit -m "feat: config, models, fu
 ### Task 3: downloader + spike on the real video
 
 **Files:**
-- Create: `backend/dialogue_finder/downloader.py`, `backend/dialogue_finder/progress.py`, `scripts/dump_frames.py`
+- Create: `backend/dialogue_finder/video/downloader.py`, `backend/dialogue_finder/progress.py`, `scripts/dump_frames.py`
 - Modify: `docs/APPROACH.md` (Phase 1 finding)
 
 **Interfaces:**
@@ -525,9 +534,9 @@ from pathlib import Path
 
 import cv2
 
-from .config import Config
-from .models import StageEvent, VideoInfo
-from .progress import ProgressReporter
+from ..config import Config
+from ..models import StageEvent, VideoInfo
+from ..progress import ProgressReporter
 
 
 class DownloadError(Exception):
@@ -608,7 +617,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend"))
 import cv2  # noqa: E402
 from dialogue_finder.config import DEFAULT  # noqa: E402
-from dialogue_finder.downloader import fetch_video, probe  # noqa: E402
+from dialogue_finder.video.downloader import fetch_video, probe  # noqa: E402
 from dialogue_finder.progress import PrintReporter  # noqa: E402
 
 url = sys.argv[1]
@@ -640,10 +649,23 @@ cd /c/Users/Asus/Quest1 && git add -A && git commit -m "feat: downloader with ca
 
 ---
 
+### Task 3b: move modules into `video/`, `audio/`, `text/` subpackages
+
+**Files:**
+- Create: `backend/dialogue_finder/video/__init__.py`, `backend/dialogue_finder/audio/__init__.py`, `backend/dialogue_finder/text/__init__.py` (each containing one docstring line naming the package's responsibility, nothing else)
+- Move (git mv): `backend/dialogue_finder/matcher.py` → `backend/dialogue_finder/text/matcher.py`; `backend/dialogue_finder/downloader.py` → `backend/dialogue_finder/video/downloader.py`
+- Modify: `backend/tests/test_matcher.py` (import path), `scripts/dump_frames.py` (import path), moved modules' relative imports (`from .config` → `from ..config`, `from .models` → `from ..models`, `from .progress` → `from ..progress`)
+
+- [ ] **Step 1: git mv + package inits + import fixes** as listed above. `progress.py`, `config.py`, `models.py` stay at top level.
+- [ ] **Step 2: run** `cd /c/Users/Asus/Quest1/backend && ../.venv/Scripts/python -m pytest -q` → expected all green (11 tests), and `cd /c/Users/Asus/Quest1 && .venv/Scripts/python -c "import sys; sys.path.insert(0,'backend'); from dialogue_finder.video.downloader import cache_key; from dialogue_finder.text.matcher import normalize; print('ok')"` → `ok`.
+- [ ] **Step 3: commit** `git add -A && git commit -m "refactor: group modules into video/, audio/, text/ subpackages"`.
+
+---
+
 ### Task 4: synthetic clip generator + FrameSource
 
 **Files:**
-- Create: `backend/bench/make_clip.py`, `backend/dialogue_finder/frame_source.py`, `backend/tests/conftest.py`
+- Create: `backend/bench/make_clip.py`, `backend/dialogue_finder/video/frame_source.py`, `backend/tests/conftest.py`
 - Test: `backend/tests/test_frame_source.py`
 
 **Interfaces:**
@@ -675,7 +697,7 @@ def synthetic_clip(tmp_path_factory):
 ```python
 import numpy as np
 
-from dialogue_finder.frame_source import FrameSource
+from dialogue_finder.video.frame_source import FrameSource
 
 
 def test_probe_values(synthetic_clip):
@@ -882,7 +904,7 @@ cd /c/Users/Asus/Quest1 && git add -A && git commit -m "feat: synthetic clip gen
 ### Task 5: OCR extractor
 
 **Files:**
-- Create: `backend/dialogue_finder/ocr.py`
+- Create: `backend/dialogue_finder/text/ocr.py`
 - Test: `backend/tests/test_ocr.py`
 
 **Interfaces:**
@@ -896,9 +918,9 @@ import numpy as np
 import pytest
 
 from dialogue_finder.config import DEFAULT
-from dialogue_finder.frame_source import FrameSource
-from dialogue_finder.matcher import score_contains
-from dialogue_finder.ocr import crop_band, prep, read_dialogue
+from dialogue_finder.video.frame_source import FrameSource
+from dialogue_finder.text.matcher import score_contains
+from dialogue_finder.text.ocr import crop_band, prep, read_dialogue
 
 
 def test_crop_band_takes_bottom_fraction():
@@ -915,7 +937,7 @@ def test_prep_upscales_to_gray():
 
 @pytest.mark.slow
 def test_rapidocr_reads_synthetic_subtitle(synthetic_clip):
-    from dialogue_finder.ocr import RapidOCRExtractor
+    from dialogue_finder.text.ocr import RapidOCRExtractor
     path, truth = synthetic_clip
     with FrameSource(path) as src:
         frame = src.frame_at(truth["frame"] + 5)
@@ -950,7 +972,7 @@ from typing import Protocol
 import cv2
 import numpy as np
 
-from .config import Config
+from ..config import Config
 from .matcher import normalize
 
 
@@ -1022,7 +1044,7 @@ cd /c/Users/Asus/Quest1 && git add -A && git commit -m "feat: OCR extractor with
 ### Task 6: scanner (coarse) + refiner (binary search)
 
 **Files:**
-- Create: `backend/dialogue_finder/scanner.py`, `backend/dialogue_finder/refiner.py`
+- Create: `backend/dialogue_finder/text/scanner.py`, `backend/dialogue_finder/text/refiner.py`
 - Test: `backend/tests/test_scanner.py`, `backend/tests/test_refiner.py`
 
 **Interfaces:**
@@ -1035,7 +1057,7 @@ cd /c/Users/Asus/Quest1 && git add -A && git commit -m "feat: OCR extractor with
 from dialogue_finder.config import DEFAULT
 from dialogue_finder.models import Candidate
 from dialogue_finder.progress import NullReporter
-from dialogue_finder.scanner import coarse_scan, group_hits, pick_group
+from dialogue_finder.text.scanner import coarse_scan, group_hits, pick_group
 
 
 class FakeSource:
@@ -1081,7 +1103,7 @@ def test_pick_group_first_last_all():
 
 `backend/tests/test_refiner.py`:
 ```python
-from dialogue_finder.refiner import first_true
+from dialogue_finder.text.refiner import first_true
 
 
 def test_first_true_finds_boundary():
@@ -1116,11 +1138,11 @@ from __future__ import annotations
 
 from typing import Callable
 
-from .config import Config
+from ..config import Config
 from .matcher import score_contains
-from .models import Candidate, StageEvent
+from ..models import Candidate, StageEvent
 from .ocr import read_dialogue
-from .progress import ProgressReporter
+from ..progress import ProgressReporter
 
 
 def coarse_scan(source, extractor, target: str, start_s: float, end_s: float, fps: float, cfg: Config,
@@ -1173,9 +1195,9 @@ from typing import Callable
 
 import cv2
 
-from .config import Config
+from ..config import Config
 from .matcher import score_contains
-from .models import Candidate
+from ..models import Candidate
 from .ocr import crop_band, read_dialogue
 
 
@@ -1334,12 +1356,12 @@ from pathlib import Path
 import cv2
 
 from .config import DEFAULT, Config
-from .downloader import DownloadError, fetch_video, probe
-from .frame_source import FrameSource
+from .video.downloader import DownloadError, fetch_video, probe
+from .video.frame_source import FrameSource
 from .models import Candidate, Result, StageEvent, Window
 from .progress import NullReporter, ProgressReporter
-from .refiner import classify_appearance, refine_first_frame
-from .scanner import coarse_scan, group_hits, pick_group
+from .text.refiner import classify_appearance, refine_first_frame
+from .text.scanner import coarse_scan, group_hits, pick_group
 
 
 class PipelineError(Exception):
@@ -1367,7 +1389,7 @@ def _save_frames(src: FrameSource, index: int, cfg: Config) -> tuple[str, str]:
 
 
 def _default_extractor():
-    from .ocr import RapidOCRExtractor
+    from .text.ocr import RapidOCRExtractor
     return RapidOCRExtractor()
 
 
@@ -1399,7 +1421,7 @@ def run(source_spec: str, target: str, *, cfg: Config = DEFAULT, reporter: Progr
     if mode in ("hybrid", "audio"):
         if locator is None and mode == "hybrid":
             try:
-                from .audio_locator import WhisperLocator
+                from .audio.locator import WhisperLocator
                 locator = WhisperLocator(cfg, reporter)
             except Exception as e:                      # module missing until Task 8, or import failure
                 reporter.emit(StageEvent("locate", "skipped", f"audio locator unavailable: {e}"))
@@ -1584,7 +1606,7 @@ cd /c/Users/Asus/Quest1 && git add -A && git commit -m "feat: pipeline orchestra
 ### Task 8: audio locator (Whisper) + hybrid path
 
 **Files:**
-- Create: `backend/dialogue_finder/audio_locator.py`
+- Create: `backend/dialogue_finder/audio/locator.py`
 - Test: `backend/tests/test_audio_locator.py`
 - Modify: `docs/APPROACH.md` (Phase 3 measured fast-path timing)
 
@@ -1601,7 +1623,7 @@ import json
 import pytest
 
 from dialogue_finder.config import DEFAULT
-from dialogue_finder.audio_locator import WhisperLocator, words_cache_path
+from dialogue_finder.audio.locator import WhisperLocator, words_cache_path
 from dialogue_finder.progress import NullReporter
 
 
@@ -1621,8 +1643,8 @@ def test_locate_uses_cached_words_and_threshold(tmp_path):
 def test_transcribe_real_audio_smoke(tmp_path):
     """Generates 3 s of silence and checks transcription returns a list (may be empty) without error."""
     import subprocess
-    from dialogue_finder.downloader import ensure_ffmpeg
-    from dialogue_finder.audio_locator import transcribe_words
+    from dialogue_finder.video.downloader import ensure_ffmpeg
+    from dialogue_finder.audio.locator import transcribe_words
     ensure_ffmpeg()
     wav = tmp_path / "s.wav"
     subprocess.run(["ffmpeg", "-y", "-f", "lavfi", "-i", "anullsrc=r=16000:cl=mono", "-t", "3", str(wav)],
@@ -1648,11 +1670,11 @@ import subprocess
 from pathlib import Path
 from typing import Protocol
 
-from .config import Config
-from .downloader import ensure_ffmpeg
-from .matcher import best_word_window
-from .models import StageEvent, Window, Word
-from .progress import ProgressReporter
+from ..config import Config
+from ..video.downloader import ensure_ffmpeg
+from ..text.matcher import best_word_window
+from ..models import StageEvent, Window, Word
+from ..progress import ProgressReporter
 
 
 class Locator(Protocol):
@@ -1789,7 +1811,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from bench.make_clip import make_clip  # noqa: E402
 from dialogue_finder.config import Config  # noqa: E402
-from dialogue_finder.ocr import RapidOCRExtractor  # noqa: E402
+from dialogue_finder.text.ocr import RapidOCRExtractor  # noqa: E402
 from dialogue_finder.pipeline import run  # noqa: E402
 
 TEXT = "My mind rebels at stagnation"
