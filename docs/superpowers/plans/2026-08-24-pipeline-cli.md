@@ -929,10 +929,10 @@ def test_crop_band_takes_bottom_fraction():
     assert band.shape[0] == 35 and band.shape[1] == 50
 
 
-def test_prep_upscales_to_gray():
+def test_prep_upscales_and_keeps_colour():
     img = np.zeros((10, 20, 3), dtype=np.uint8)
     out = prep(img, 2.0)
-    assert out.shape == (20, 40)
+    assert out.shape == (20, 40, 3)
 
 
 @pytest.mark.slow
@@ -986,10 +986,10 @@ def crop_band(image: np.ndarray, fraction: float) -> np.ndarray:
 
 
 def prep(image: np.ndarray, upscale: float) -> np.ndarray:
-    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) if image.ndim == 3 else image
+    """Upscale only. Colour is kept: RapidOCR reads BGR best (grayscale made it drop word spaces in testing)."""
     if upscale and upscale != 1.0:
-        gray = cv2.resize(gray, None, fx=upscale, fy=upscale, interpolation=cv2.INTER_CUBIC)
-    return gray
+        return cv2.resize(image, None, fx=upscale, fy=upscale, interpolation=cv2.INTER_CUBIC)
+    return image
 
 
 class RapidOCRExtractor:
@@ -1001,6 +1001,8 @@ class RapidOCRExtractor:
 
     def _get(self):
         if self._engine is None:
+            import logging
+            logging.getLogger("RapidOCR").setLevel(logging.WARNING)   # keep stderr/test output clean
             from rapidocr import RapidOCR
             self._engine = RapidOCR()
         return self._engine

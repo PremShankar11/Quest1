@@ -19,10 +19,10 @@ def crop_band(image: np.ndarray, fraction: float) -> np.ndarray:
 
 
 def prep(image: np.ndarray, upscale: float) -> np.ndarray:
-    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) if image.ndim == 3 else image
+    """Upscale only. Colour is kept: RapidOCR reads BGR best (grayscale made it drop word spaces in testing)."""
     if upscale and upscale != 1.0:
-        gray = cv2.resize(gray, None, fx=upscale, fy=upscale, interpolation=cv2.INTER_CUBIC)
-    return gray
+        return cv2.resize(image, None, fx=upscale, fy=upscale, interpolation=cv2.INTER_CUBIC)
+    return image
 
 
 class RapidOCRExtractor:
@@ -34,6 +34,8 @@ class RapidOCRExtractor:
 
     def _get(self):
         if self._engine is None:
+            import logging
+            logging.getLogger("RapidOCR").setLevel(logging.WARNING)
             from rapidocr import RapidOCR
             self._engine = RapidOCR()
         return self._engine

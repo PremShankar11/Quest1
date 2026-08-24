@@ -13,10 +13,10 @@ def test_crop_band_takes_bottom_fraction():
     assert band.shape[0] == 35 and band.shape[1] == 50
 
 
-def test_prep_upscales_to_gray():
+def test_prep_upscales_and_keeps_colour():
     img = np.zeros((10, 20, 3), dtype=np.uint8)
     out = prep(img, 2.0)
-    assert out.shape == (20, 40)
+    assert out.shape == (20, 40, 3)
 
 
 @pytest.mark.slow
