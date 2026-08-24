@@ -21,9 +21,18 @@ def first_true(lo: int, hi: int, pred: Callable[[int], bool]) -> int:
     return hi
 
 
+MAX_BACK_HOPS = 8   # module constant; each hop is one OCR call
+
+
 def refine_first_frame(source, extractor, target: str, hit_index: int, prev_index: int, cfg: Config,
-                       read: Callable = read_dialogue) -> Candidate:
-    """Binary-search OCR score between prev_index (no match) and hit_index (match) → exact first frame."""
+                       read: Callable = read_dialogue, step: int = 1) -> tuple[Candidate, bool]:
+    """Binary-search OCR score between prev_index (no match) and hit_index (match) → exact first frame.
+
+    `prev_index` is only a coarse-scan sample, not guaranteed to precede the text: if the text is
+    already visible there, hop back (up to MAX_BACK_HOPS steps) looking for a real no-match anchor
+    before binary-searching. Returns (Candidate, exact) — exact is False only when back-hopping ran
+    out of budget while the text was still visible, so the true first frame may be earlier still.
+    """
     cache: dict[int, tuple[str, float]] = {}
 
     def ocr_at(i: int) -> tuple[str, float]:
@@ -32,10 +41,21 @@ def refine_first_frame(source, extractor, target: str, hit_index: int, prev_inde
             cache[i] = (text, score_contains(target, text))
         return cache[i]
 
-    lo = max(-1, prev_index)
-    first = first_true(lo, hit_index, lambda i: ocr_at(i)[1] >= cfg.ocr_match_threshold)
+    hops = 0
+    while prev_index >= 0 and hops < MAX_BACK_HOPS and ocr_at(prev_index)[1] >= cfg.ocr_match_threshold:
+        hit_index, prev_index = prev_index, prev_index - step
+        hops += 1
+    exact = not (prev_index >= 0 and hops == MAX_BACK_HOPS and ocr_at(prev_index)[1] >= cfg.ocr_match_threshold)
+
+    if exact:
+        lo = max(-1, prev_index)
+        first = first_true(lo, hit_index, lambda i: ocr_at(i)[1] >= cfg.ocr_match_threshold)
+    else:
+        # no known-False anchor within the hop budget; first_true's contract can't be satisfied,
+        # so report the last confirmed-matching hop instead of pretending to refine further.
+        first = hit_index
     text, score = ocr_at(first)
-    return Candidate(first, source.time_for_index(first), text, score)
+    return Candidate(first, source.time_for_index(first), text, score), exact
 
 
 def _edge_density(frame, cfg: Config) -> float:

@@ -1,8 +1,10 @@
+import cv2
+import numpy as np
 import pytest
 
 from dialogue_finder.config import DEFAULT
 from dialogue_finder.models import Window
-from dialogue_finder.pipeline import confidence_for, run
+from dialogue_finder.pipeline import PipelineError, _write_png, confidence_for, run
 
 
 def test_confidence_rules():
@@ -11,6 +13,25 @@ def test_confidence_rules():
     assert confidence_for("ocr", 0.82, None) == "MEDIUM"
     assert confidence_for("audio", 0.0, Window(1, 2, 0.9, "x")) == "MEDIUM"
     assert confidence_for("ocr-weak", 0.4, None) == "LOW"
+
+
+def test_write_png_handles_non_ascii_path(tmp_path):
+    frame = np.full((10, 12, 3), 200, dtype=np.uint8)
+    d = tmp_path / "José"
+    d.mkdir()
+    p = d / "f.png"
+    _write_png(p, frame)
+    assert p.exists()
+    decoded = cv2.imdecode(np.frombuffer(p.read_bytes(), dtype=np.uint8), cv2.IMREAD_COLOR)
+    assert decoded.shape == frame.shape
+
+
+def test_write_png_unwritable_parent_raises(tmp_path):
+    frame = np.zeros((10, 10, 3), dtype=np.uint8)
+    bad_parent = tmp_path / "not_a_dir"
+    bad_parent.write_text("x")   # a file, not a directory
+    with pytest.raises(PipelineError):
+        _write_png(bad_parent / "f.png", frame)
 
 
 @pytest.mark.slow
@@ -84,6 +105,19 @@ def test_audio_mode_no_match_raises_pipeline_error(synthetic_clip, tmp_path):
     cfg = DEFAULT.__class__(output_dir=tmp_path / "out_audio2", cache_dir=tmp_path / "cache_audio2")
     with pytest.raises(PipelineError):
         run(str(path), truth["text"], cfg=cfg, mode="audio", local=True, locator=FakeNoLocate())
+
+
+def test_ocr_weak_fallback_text_is_explicit(synthetic_clip, tmp_path, monkeypatch):
+    """When the OCR scan produces zero candidates at all (e.g. a degenerate scan range),
+    the weak-fallback text must be an explicit placeholder, not an empty string."""
+    import dialogue_finder.pipeline as pipeline_mod
+    path, truth = synthetic_clip
+    cfg = DEFAULT.__class__(output_dir=tmp_path / "out3", cache_dir=tmp_path / "cache3")
+    monkeypatch.setattr(pipeline_mod, "_scan_for_groups", lambda *a, **k: ([], []))
+    res = run(str(path), truth["text"], cfg=cfg, mode="ocr", local=True, extractor=FakeNoMatch())
+    assert res.source == "ocr-weak"
+    assert res.text == "(no text detected)"
+    assert res.note == "no text detected anywhere; frame 0 returned"
 
 
 def test_hybrid_retries_widened_window_not_whole_video(synthetic_clip, tmp_path):

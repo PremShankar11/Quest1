@@ -91,7 +91,8 @@ yt-dlp, static-ffmpeg, opencv-python, rapidocr + onnxruntime, faster-whisper, ra
 
 - AI's `_load_model` wrapped `WhisperModel(..., device="cuda")` **construction** in try/except, assuming
   a CUDA failure surfaces there. → I changed the fallback to wrap the `model.transcribe(...)` call
-  itself, reloading on `device="cpu"` and retrying once on `RuntimeError`. → On this machine
+  itself, reloading on `device="cpu"` and retrying once: it catches any exception whose message mentions
+  cuda/cublas/cudnn/gpu, retries once on CPU; other errors propagate. → On this machine
   `ctranslate2` enumerates a GPU so construction succeeds, but the CUDA runtime DLL (`cublas64_12.dll`)
   is missing — the failure only surfaces on first inference, past the plan's try/except. Confirmed firing
   in the real run's log.

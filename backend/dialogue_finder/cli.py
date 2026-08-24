@@ -31,7 +31,12 @@ def main(argv: list[str] | None = None) -> int:
     except SystemExit as e:               # argparse exits 2 on usage error
         return int(e.code) if e.code is not None else 2
     cfg = Config(output_dir=Path(args.out), cache_dir=DEFAULT.cache_dir)
-    from .pipeline import PipelineError, run
+    try:
+        from .pipeline import PipelineError, run
+    except Exception as e:                # broken/missing dependency (e.g. opencv DLL load failure)
+        print(f"Error: cannot start (missing or broken dependency): {type(e).__name__}: {str(e)[:200]}",
+              file=sys.stderr)
+        return 1
     try:
         res = run(args.url or args.local, args.text, cfg=cfg, reporter=PrintReporter(args.verbose),
                   mode=args.mode, occurrence=args.occurrence, local=args.local is not None)

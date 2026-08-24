@@ -51,8 +51,9 @@ stray character can't score as a perfect match — see docs/DECISIONS.md).
 Two kinds handled explicitly: (1) the same line appears more than once — `--occurrence first|last|all`
 picks which OCR hit to report, all candidates are still recorded in `Result.candidates`; (2) the line
 fades or pops onto screen rather than appearing on one clean frame — `classify_appearance` (Canny edge
-diff between frame *n-1* and *n*) labels the `Previous` evidence pair `pop-in` or `fade-in`, and
-confidence is downgraded to `MEDIUM` for a fade so the label and the confidence agree with each other.
+diff between frame *n-1* and *n*) labels the `Previous` evidence pair `pop-in` or `fade-in`; the fade's
+lower OCR score lands it at `MEDIUM` (confidence comes only from the OCR score), which agrees with the
+fade-in label.
 
 ## Phase 3 — Build
 
@@ -125,7 +126,7 @@ loaded`) only surfaces on the first `model.transcribe()` call, inside
 the `model.transcribe(...)` call itself in `transcribe_words`: on `RuntimeError`
 when `device == "cuda"`, reload as `WhisperModel(name, device="cpu",
 compute_type="int8")` and retry once, emitting
-`StageEvent("transcribe", "fallback", "cuda unavailable, retrying whisper base on cpu")`.
+`StageEvent("transcribe", "running", "cuda unavailable, retrying whisper base on cpu")`.
 Confirmed firing in the real run's log (see below). No other change to the brief's
 code.
 
@@ -276,9 +277,9 @@ already handles `center_position` text outside the bottom band, so nothing neede
 fixing there. The one non-zero row is `fade_12_frames`: text fades in over 12
 frames, so "first frame with detectable text" is inherently fuzzy at low opacity;
 the pipeline lands 1 frame after the nominal fully-transparent start (well inside
-the 12-frame fade window) and correctly reports `MEDIUM` confidence via
-`classify_appearance`'s fade-in detection — this is the expected, documented limit
-for gradual-appearance text, not a bug.
+the 12-frame fade window), and the fade's lower OCR score lands it at `MEDIUM`
+(confidence comes only from the OCR score), which agrees with the fade-in label —
+this is the expected, documented limit for gradual-appearance text, not a bug.
 
 ### Real-video matrix (Task 9, Step 3)
 
@@ -339,6 +340,11 @@ runs is dominated by `whisper base` CPU transcription (60-120 s), not download.
   ≈ 0.6 s/OCR call on this CPU; on the 54-minute test video that's ≈ 65 minutes for a full scan at
   `fullscan_fps=2.0`. This is why the pipeline prefers to locate via audio first and only fall back to a
   full scan when there's no transcript match to anchor a window on.
+- **Weak-fallback `text` value.** When no OCR candidates were produced at all (the scan range yielded
+  zero sampled frames), `Result.text` is the explicit string `"(no text detected)"`, not `""` — an empty
+  string reads as "we found something and it was blank"; the placeholder says plainly that nothing was
+  read. When candidates exist but none matched, `text` stays the best candidate's raw (non-matching)
+  OCR read.
 
 ### Extensions not built (out of scope for Plan 1)
 

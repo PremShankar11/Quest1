@@ -30,15 +30,28 @@ def confidence_for(source: str, ocr_score: float, window: Window | None) -> str:
     return "LOW"
 
 
+def _write_png(path: Path, frame) -> None:
+    """Encode `frame` as PNG and write it directly, bypassing cv2.imwrite: on non-ASCII Windows
+    paths imwrite returns True and writes nothing, and on unwritable paths it returns False
+    without raising."""
+    ok, buf = cv2.imencode(".png", frame)
+    if not ok:
+        raise PipelineError(f"could not encode frame image for {path}")
+    try:
+        path.write_bytes(buf.tobytes())
+    except OSError as e:
+        raise PipelineError(f"could not write {path}: {e}") from e
+
+
 def _save_frame_images(src: FrameSource, index: int, cfg: Config) -> tuple[str, str]:
     """Write the frame at `index` (and its predecessor, if any) as PNGs; return (path, prev_path)."""
     cfg.output_dir.mkdir(parents=True, exist_ok=True)
     p = cfg.output_dir / f"frame_{index}.png"
-    cv2.imwrite(str(p), src.frame_at(index))
+    _write_png(p, src.frame_at(index))
     prev = ""
     if index > 0:
         pp = cfg.output_dir / f"frame_{index - 1}.png"
-        cv2.imwrite(str(pp), src.frame_at(index - 1))
+        _write_png(pp, src.frame_at(index - 1))
         prev = str(pp)
     return str(p), prev
 
@@ -157,17 +170,27 @@ def run(source_spec: str, target: str, *, cfg: Config = DEFAULT, reporter: Progr
         t3 = time.perf_counter()
         if groups:
             refined: list[Candidate] = []
-            for g in groups:
+            best_exact = True
+            for i, g in enumerate(groups):
                 hit = g[0]
-                refined.append(refine_first_frame(src, ex, target, hit.frame_index, hit.frame_index - step, cfg))
+                cand, exact = refine_first_frame(src, ex, target, hit.frame_index, hit.frame_index - step, cfg,
+                                                 step=step)
+                refined.append(cand)
+                if i == 0:
+                    best_exact = exact
             best = refined[0]
             reporter.emit(StageEvent("refine", "ok", f"first frame {best.frame_index} score {best.score:.2f}", 1.0,
                                      {"frame_index": best.frame_index}))
             appearance = classify_appearance(src, best.frame_index, cfg)
             timings["refine"] = time.perf_counter() - t3
+            confidence = confidence_for("ocr", best.score, window)
+            note = ""
+            if not best_exact:
+                note = "text already visible at scan start; first frame may be earlier"
+                confidence = "MEDIUM"
             return _finish(src, cfg, reporter, timings, t0, best.frame_index, "result ready",
                            timestamp_s=best.timestamp_s, text=best.text,
-                           confidence=confidence_for("ocr", best.score, window), source="ocr",
+                           confidence=confidence, source="ocr", note=note,
                            appearance=appearance, window=window, candidates=cands, alternatives=refined[1:])
 
         # ---- fallbacks ----------------------------------------------------------
@@ -178,7 +201,7 @@ def run(source_spec: str, target: str, *, cfg: Config = DEFAULT, reporter: Progr
                            timestamp_s=src.time_for_index(idx), text=window.matched_text, confidence="MEDIUM",
                            source="audio", note="no on-screen text matched; frame at first spoken word",
                            window=window, candidates=cands)
-        weak = max(cands, key=lambda c: c.score) if cands else Candidate(0, 0.0, "", 0.0)
+        weak = max(cands, key=lambda c: c.score) if cands else Candidate(0, 0.0, "(no text detected)", 0.0)
         note = (f"best OCR similarity only {weak.score:.2f}" if cands
                 else "no text detected anywhere; frame 0 returned")
         reporter.emit(StageEvent("refine", "fallback", f"no match anywhere; best effort frame {weak.frame_index}"))

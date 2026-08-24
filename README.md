@@ -25,7 +25,11 @@ Frame numbers are 0-based. Timestamp is `HH:MM:SS.sss`.
 Flags: `--local <file>` (use a local file instead of `--url`), `--mode hybrid|audio|ocr` (default `hybrid`),
 `--occurrence first|last|all` (default `first`), `--verbose`/`-v`, `--json`, `--out <dir>` (default `output`).
 
-First run downloads faster-whisper's `base` model (~150 MB), RapidOCR's models (~10 MB), and the video
+`--occurrence last|all` ranks matches inside the region that was scanned — the audio window in hybrid
+mode; use `--mode ocr` for a whole-video ranking.
+
+First run downloads faster-whisper's `base` model (approximately 150 MB), RapidOCR's models
+(approximately 10 MB), and the video
 itself. Later runs reuse `cache/` (relative to the working directory — so `backend/cache/` when run from
 `backend/`) and skip re-downloading and re-transcribing. Runs CPU-only; a CUDA GPU is used automatically
 when available and falls back to CPU on failure (measured — see docs/DECISIONS.md). Measured timings:

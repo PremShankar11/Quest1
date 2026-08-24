@@ -34,10 +34,11 @@ class RapidOCRExtractor:
 
     def _load_engine(self):
         if self._engine is None:
-            import logging
-            logging.getLogger("RapidOCR").setLevel(logging.WARNING)
             from rapidocr import RapidOCR
-            self._engine = RapidOCR()
+            # RapidOCR.__init__ itself calls logger.setLevel(cfg.Global.log_level.upper()) — default
+            # "info" — before its own model-loading log lines fire, so setting the logger level after
+            # import (but before construction) is a no-op; it must go through the engine's own config.
+            self._engine = RapidOCR(params={"Global.log_level": "error"})
         return self._engine
 
     def read(self, image: np.ndarray) -> str:

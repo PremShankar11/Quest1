@@ -1,3 +1,4 @@
+import sys
 from pathlib import Path
 
 import pytest
@@ -10,6 +11,17 @@ def test_unreachable_url_is_clean(capsys):
     assert code == 1
     err = capsys.readouterr().err
     assert err.startswith("Error:") and "Traceback" not in err
+
+
+def test_broken_pipeline_import_is_clean(capsys, monkeypatch):
+    """A broken/missing dependency (e.g. opencv DLL load failure) surfacing on
+    `from .pipeline import ...` must print a clean Error line, never a traceback."""
+    monkeypatch.setitem(sys.modules, "dialogue_finder.pipeline", None)
+    code = main(["--local", "unused.mp4", "--text", "x", "--mode", "ocr"])
+    assert code == 1
+    err = capsys.readouterr().err
+    assert "Error:" in err
+    assert "Traceback" not in err
 
 
 def test_corrupt_file_is_clean(capsys, tmp_path):
