@@ -249,6 +249,15 @@ def test_score_contains_unrelated_is_low():
     assert score_contains("My mind rebels at stagnation", "Come along Watson") < 0.6
 
 
+def test_score_contains_short_fragment_is_low():
+    assert score_contains("My mind rebels at stagnation", "R") < 0.1
+    assert score_contains("My mind rebels at stagnation", "mind") < 0.3
+
+
+def test_score_contains_near_full_read_still_high():
+    assert score_contains("My mind rebels at stagnation", "My mindrebels at stagnation") >= 0.9
+
+
 def test_score_contains_empty_haystack_is_zero():
     assert score_contains("anything", "") == 0.0
 
@@ -305,6 +314,7 @@ class Config:
     window_pad_s: float = 3.0
     window_fps: float = 5.0
     fullscan_fps: float = 2.0
+    retry_pad_s: float = 15.0         # widened window when the first OCR scan misses (never whole-video if audio matched)
     band_fraction: float = 0.35
     ocr_upscale: float = 2.0
     hit_gap_s: float = 2.0            # candidates further apart than this are separate occurrences
@@ -438,7 +448,8 @@ def score_contains(target: str, haystack: str) -> float:
     t, h = normalize(target), normalize(haystack)
     if not t or not h:
         return 0.0
-    return fuzz.partial_ratio(t, h) / 100.0
+    coverage = min(1.0, len(h) / len(t))          # a lone OCR "R" must not match a 28-char line (partial_ratio pitfall)
+    return fuzz.partial_ratio(t, h) / 100.0 * coverage
 
 
 def score_similar(a: str, b: str) -> float:
@@ -1470,9 +1481,13 @@ def run(source_spec: str, target: str, *, cfg: Config = DEFAULT, reporter: Progr
         cands = coarse_scan(src, ex, target, a, b, fps, cfg, reporter)
         groups = pick_group(group_hits(cands, cfg.ocr_match_threshold, cfg.hit_gap_s), occurrence)
         if not groups and window is not None and mode == "hybrid":
-            # the window missed; one more try over the whole video before giving up on OCR
-            reporter.emit(StageEvent("scan", "fallback", "no match in window; scanning whole video"))
-            cands = coarse_scan(src, ex, target, 0.0, src.duration_s, cfg.fullscan_fps, cfg, reporter)
+            # the window missed; retry once over a widened window (a confident audio match makes a
+            # whole-video scan pointless: 65 min on CPU for the 54-min test video)
+            a2 = max(0.0, window.start_s - cfg.retry_pad_s)
+            b2 = min(src.duration_s, window.end_s + cfg.retry_pad_s)
+            fps = cfg.fullscan_fps
+            reporter.emit(StageEvent("scan", "fallback", f"no match in window; retrying {a2:.0f}-{b2:.0f}s at {fps} fps"))
+            cands = coarse_scan(src, ex, target, a2, b2, fps, cfg, reporter)
             groups = pick_group(group_hits(cands, cfg.ocr_match_threshold, cfg.hit_gap_s), occurrence)
         timings["scan"] = time.perf_counter() - t2
         step = max(1, int(round(src.fps / fps)))
