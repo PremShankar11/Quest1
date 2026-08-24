@@ -18,7 +18,6 @@ class NullReporter:
 class PrintReporter:
     def __init__(self, verbose: bool = False) -> None:
         self.verbose = verbose
-        self._last_progress_stage = ""
 
     def emit(self, event: StageEvent) -> None:
         if event.progress is not None and not self.verbose:
