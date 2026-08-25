@@ -7,6 +7,7 @@
   --amber: #F2B33D;
   --teal: #4FD1C5;
   --danger: #E5634C;
+  --go-ink: #12312F; /* ink on teal would be ~1.4:1 contrast; deliberate exception for the primary action fill */
 
   --font-display: "Barlow Condensed", "Arial Narrow", Impact, sans-serif;
   --font-body: "Barlow", "Segoe UI", Arial, sans-serif;
@@ -110,7 +111,7 @@ body {
 
 .go {
   background: var(--teal);
-  color: #12312F;
+  color: var(--go-ink);
   border: none;
   font-family: var(--font-body);
   font-weight: 500;

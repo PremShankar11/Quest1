@@ -14,7 +14,7 @@ const showError = (msg) => { error.textContent = msg; error.hidden = false; setS
 function reset() {
   error.hidden = true; $("result").hidden = true; $("cands-block").hidden = true; $("transcript-block").hidden = true;
   $("filmstrip").innerHTML = ""; $("ticks").innerHTML = ""; $("window").hidden = true; $("marker").hidden = true;
-  delete $("timeline").dataset.route;
+  delete $("timeline").dataset.route; delete $("result").dataset.route;
   $("tc-end").textContent = "--:--:--"; duration = 0; fps = 0; seenCandidates.clear();
   document.querySelectorAll("#stages li").forEach((li) => { li.dataset.status = ""; li.querySelector(".msg").textContent = ""; });
   hint.textContent = "Starting…";
@@ -50,7 +50,7 @@ function onEvent(e) {
   }
   if (ev.stage === "refine" && p.frame_index !== undefined && fps) placeMarker(p.frame_index / fps);   // ok AND fallback routes
   if (ev.stage === "error") showError(ev.message);
-  if (ev.stage === "end") finish(ev.status);
+  if (ev.stage === "end") finish(ev.status, ev.message);
 }
 
 function addCandidate(frame, score, text) {
@@ -64,11 +64,19 @@ function addCandidate(frame, score, text) {
 
 function placeMarker(t) { const m = $("marker"); m.style.left = pct(t); $("marker-tc").textContent = tc(t); m.hidden = false; }
 
-async function finish(st) {
+async function finish(st, msg) {
   if (es) { es.close(); es = null; }
   $("go").disabled = false; $("go").textContent = "Find frame"; $("cancel").hidden = true;
-  if (st !== "done") { setState(st === "cancelled" ? "idle" : "error", st); if (st === "cancelled") hint.textContent = "Stopped."; return; }
-  const job = await (await fetch(`/jobs/${jobId}`)).json(), r = job.result;
+  if (st === "cancelled") { setState("idle", "cancelled"); hint.textContent = "Stopped."; return; }
+  if (st === "error") { showError(msg || "The run failed. Check the server log."); return; }
+  let job;
+  try {
+    job = await (await fetch(`/jobs/${jobId}`)).json();
+  } catch {
+    showError("Finished, but the result could not be loaded. Refresh the page and run again.");
+    return;
+  }
+  const r = job.result;
   setState("done", "done"); hint.textContent = "Done.";
   placeMarker(r.timestamp_s);
   $("r-tc").textContent = r.timestamp; $("r-frame").textContent = `frame ${r.frame_index}`;
