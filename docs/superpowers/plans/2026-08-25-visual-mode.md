@@ -242,7 +242,7 @@ If Task 1 decided FALLBACK: this task instead implements `LipMotionDetector(mode
 - Test: `backend/tests/test_api.py` (speaker image endpoint 404/200 with a fake result)
 
 **Interfaces:**
-- Consumes: events `verify` (`running` payload `{window_index, faces, asd_mean}`, then `ok|skipped|fallback`), `occurrences` (`ok`, payload `{"occurrences": [Occurrence.to_dict()...]}`), result fields from Task 2/6.
+- Consumes: events `verify` (`running` payload `{window_index}`; `ok` payload `{window_index, faces, asd_mean, klass}` — faces/asd_mean are only known after scoring; `skipped|fallback` carry a message), `occurrences` (`ok`, payload `{"occurrences": [Occurrence.to_dict()...]}`), result fields from Task 2/6.
 - Page: mode select order `hybrid, audio+ocr, audio, ocr`; a **Occurrences** block (hidden until the event) with one row per occurrence: `tc(start)–tc(end) · ASR 0.95 · OCR ✓/✗ · faces N · speaking ✓/✗/? · <badge class>` (badge colours: valid teal, uncertain muted, invalid danger); timeline: one 2-px mark per occurrence in its class colour (selected occurrence keeps the amber window); result card: when `speaker_box` exists show the speaker image (with the box) in place of the plain result frame and print `occurrence_class` next to the route. Copy for skipped verify: "Active-speaker check unavailable (install requirements-asd.txt) — using audio + OCR."
 - [ ] Steps: test → implement → run the synthetic clip and the real episode through the page (Playwright if available; the episode now shows Occurrences + the boxed Holmes frame) → screenshot `docs/ui-hybrid.png` → commit `feat: page shows occurrences and the speaking face`.
 
