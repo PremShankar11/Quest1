@@ -72,7 +72,9 @@ async function finish(st) {
   setState("done", "done"); hint.textContent = "Done.";
   placeMarker(r.timestamp_s);
   $("r-tc").textContent = r.timestamp; $("r-frame").textContent = `frame ${r.frame_index}`;
-  $("r-route").textContent = `${r.source} · ${r.confidence}`; $("result").dataset.route = $("timeline").dataset.route = r.source.startsWith("ocr") ? "ocr" : "audio";
+  $("r-route").textContent = `${r.source} · ${r.confidence}`;
+  const route = r.source.startsWith("ocr") ? "ocr" : "audio";
+  $("result").dataset.route = route; $("timeline").dataset.route = route;
   $("r-img").src = `/jobs/${jobId}/frames/${r.frame_index}.png`; $("r-img-cap").textContent = `frame ${r.frame_index} — ${r.timestamp}`;
   if (r.frame_index > 0) { $("r-prev").src = `/jobs/${jobId}/frames/${r.frame_index - 1}.png`; $("r-prev-cap").textContent = `frame ${r.frame_index - 1}${r.appearance ? " — " + r.appearance : ""}`; }
   $("r-text").textContent = r.text; $("r-note").textContent = r.note || "";

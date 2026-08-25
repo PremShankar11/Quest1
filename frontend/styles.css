@@ -66,7 +66,6 @@ body {
   white-space: nowrap;
 }
 
-.pill[data-state="idle"] { color: var(--muted); border-color: var(--line); }
 .pill[data-state="running"] { color: var(--amber); border-color: var(--amber); }
 .pill[data-state="done"] { color: var(--teal); border-color: var(--teal); background: rgba(79, 209, 197, .08); }
 .pill[data-state="error"] { color: var(--danger); border-color: var(--danger); background: rgba(229, 99, 76, .08); }
@@ -233,7 +232,6 @@ body {
 }
 
 #timeline[data-route="audio"] .marker { background: var(--amber); }
-#timeline[data-route="ocr"] .marker { background: var(--teal); }
 
 .marker .tc {
   position: absolute;
@@ -244,7 +242,6 @@ body {
 }
 
 #timeline[data-route="audio"] .marker .tc { color: var(--amber); }
-#timeline[data-route="ocr"] .marker .tc { color: var(--teal); }
 
 .hint { color: var(--muted); font-size: 13px; margin: 0; }
 
