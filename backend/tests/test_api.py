@@ -171,6 +171,44 @@ def test_frame_png_from_synthetic_clip(monkeypatch, synthetic_clip):
         assert r.status_code == 200 and r.headers["content-type"] == "image/png" and len(r.content) > 500
 
 
+def test_speaker_png_404_unknown_job():
+    with TestClient(app) as c:
+        assert c.get("/jobs/nope/speaker.png").status_code == 404
+
+
+def test_speaker_png_404_without_result():
+    with TestClient(app) as c:
+        job = jobs_mod.Job(jobs_mod.JobRequest(url="x", text="y"))
+        store._jobs[job.id] = job   # still running: no result yet
+        assert c.get(f"/jobs/{job.id}/speaker.png").status_code == 404
+
+
+def test_speaker_png_404_without_speaker_image():
+    with TestClient(app) as c:
+        job = jobs_mod.Job(jobs_mod.JobRequest(url="x", text="y"))
+        store._jobs[job.id] = job
+        job.result = RESULT.to_dict()   # speaker_image_path == "" by default
+        assert c.get(f"/jobs/{job.id}/speaker.png").status_code == 404
+
+
+def test_speaker_png_200_from_result_path(tmp_path):
+    import cv2
+    import numpy as np
+
+    img = np.zeros((10, 10, 3), dtype=np.uint8)
+    ok, buf = cv2.imencode(".png", img)
+    assert ok
+    png_path = tmp_path / "speaker.png"
+    png_path.write_bytes(buf.tobytes())
+    with TestClient(app) as c:
+        job = jobs_mod.Job(jobs_mod.JobRequest(url="x", text="y"))
+        store._jobs[job.id] = job
+        result = dataclasses.replace(RESULT, speaker_image_path=str(png_path))
+        job.result = result.to_dict()
+        r = c.get(f"/jobs/{job.id}/speaker.png")
+        assert r.status_code == 200 and r.headers["content-type"] == "image/png"
+
+
 def test_validation_errors_are_json():
     with TestClient(app) as c:
         assert c.post("/jobs", json={"url": "", "text": ""}).status_code == 422

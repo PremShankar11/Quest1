@@ -16,6 +16,7 @@ const showError = (msg, detail) => {
 
 function reset() {
   error.hidden = true; $("result").hidden = true; $("cands-block").hidden = true; $("transcript-block").hidden = true;
+  $("occurrences-block").hidden = true; $("occurrences").innerHTML = ""; $("occ-marks").innerHTML = "";
   $("filmstrip").innerHTML = ""; $("ticks").innerHTML = ""; $("window").hidden = true; $("marker").hidden = true;
   delete $("timeline").dataset.route; delete $("result").dataset.route;
   $("tc-end").textContent = "--:--:--"; duration = 0; fps = 0; seenCandidates.clear();
@@ -30,9 +31,12 @@ function stage(name, statusName, msg) {
   if (msg) li.querySelector(".msg").textContent = msg;
 }
 
+const VERIFY_SKIPPED_MSG = "Active-speaker check unavailable (install requirements-asd.txt) — using audio + OCR.";
+
 function onEvent(e) {
   const ev = JSON.parse(e.data), p = ev.payload || {};
-  stage(ev.stage, ev.status, ev.message);
+  const msg = (ev.stage === "verify" && ev.status === "skipped") ? VERIFY_SKIPPED_MSG : ev.message;
+  stage(ev.stage, ev.status, msg);
   if (ev.stage === "download" && ev.status === "ok" && p.duration_s) {
     duration = p.duration_s; fps = p.fps; $("tc-end").textContent = tc(duration);
     hint.textContent = `${Math.round(duration)} s of video at ${fps.toFixed(3)} fps — listening for the line…`;
@@ -52,8 +56,38 @@ function onEvent(e) {
     hint.textContent = `Scanning… frame ${p.frame_index}, best match ${p.best.toFixed(2)}`;
   }
   if (ev.stage === "refine" && p.frame_index !== undefined && fps) placeMarker(p.frame_index / fps);   // ok AND fallback routes
+  if (ev.stage === "occurrences" && p.occurrences) renderOccurrences(p.occurrences);
   if (ev.stage === "error") showError(ev.message);
   if (ev.stage === "end") finish(ev.status, ev.message, p);
+}
+
+function renderOccurrences(occurrences) {
+  const list = $("occurrences"), marks = $("occ-marks");
+  list.innerHTML = ""; marks.innerHTML = "";
+  occurrences.forEach((occ) => {
+    const w = occ.window;
+    const ocrMark = occ.klass === "valid-text" ? "✓" : "✗";
+    const speakMark = occ.klass === "valid-speaker" ? "✓" : occ.klass === "invalid" ? "✗" : "?";
+    const li = document.createElement("li");
+    li.className = "occ-row"; li.dataset.klass = occ.klass;
+    const main = document.createElement("span");
+    main.className = "mono";
+    main.textContent = `${tc(w.start_s)}–${tc(w.end_s)} · ASR ${w.score.toFixed(2)} · OCR ${ocrMark} · faces ${occ.faces} · speaking ${speakMark}`;
+    const badge = document.createElement("span");
+    badge.className = "badge"; badge.textContent = occ.klass;
+    li.append(main, badge);
+    if (occ.text) {
+      const q = document.createElement("q");
+      q.className = "mono muted"; q.textContent = occ.text;
+      li.append(" ", q);
+    }
+    list.appendChild(li);
+
+    const mark = document.createElement("i");
+    mark.dataset.klass = occ.klass; mark.style.left = pct(w.start_s);
+    marks.appendChild(mark);
+  });
+  $("occurrences-block").hidden = false;
 }
 
 function addCandidate(frame, score, text) {
@@ -86,10 +120,18 @@ async function finish(st, msg, payload) {
   setState("done", "done"); hint.textContent = "Done.";
   placeMarker(r.timestamp_s);
   $("r-tc").textContent = r.timestamp; $("r-frame").textContent = `frame ${r.frame_index}`;
-  $("r-route").textContent = `${r.source} · ${r.confidence}`;
+  $("r-route").textContent = r.occurrence_class ? `${r.source} · ${r.confidence} · ${r.occurrence_class}` : `${r.source} · ${r.confidence}`;
   const route = r.source.startsWith("ocr") ? "ocr" : "audio";
   $("result").dataset.route = route; $("timeline").dataset.route = route;
-  $("r-img").src = `/jobs/${jobId}/frames/${r.frame_index}.png`; $("r-img-cap").textContent = `frame ${r.frame_index} — ${r.timestamp}`;
+  if (r.window) {   // hybrid can select a different window than the one `locate` first drew
+    const w = r.window, el = $("window");
+    el.style.left = pct(w.start_s); el.style.width = `calc(${pct(w.end_s)} - ${pct(w.start_s)})`; el.hidden = false;
+  }
+  if (r.speaker_box) {
+    $("r-img").src = `/jobs/${jobId}/speaker.png`; $("r-img-cap").textContent = `frame ${r.frame_index} — ${r.timestamp} (speaker boxed)`;
+  } else {
+    $("r-img").src = `/jobs/${jobId}/frames/${r.frame_index}.png`; $("r-img-cap").textContent = `frame ${r.frame_index} — ${r.timestamp}`;
+  }
   if (r.frame_index > 0) { $("r-prev").src = `/jobs/${jobId}/frames/${r.frame_index - 1}.png`; $("r-prev-cap").textContent = `frame ${r.frame_index - 1}${r.appearance ? " — " + r.appearance : ""}`; }
   $("r-text").textContent = r.text; $("r-note").textContent = r.note || "";
   $("r-alts").textContent = r.alternatives?.length ? "Also at: " + r.alternatives.map((a) => `frame ${a.frame_index} (${tc(a.timestamp_s)})`).join(", ") : "";
@@ -106,7 +148,7 @@ form.addEventListener("submit", async (e) => {
   if (!res.ok) { showError("The server rejected the request — check both fields are filled in."); $("go").disabled = false; $("go").textContent = "Find frame"; return; }
   jobId = (await res.json()).id; $("cancel").hidden = false;
   es = new EventSource(`/jobs/${jobId}/events`);
-  ["download", "transcribe", "locate", "scan", "refine", "done", "error", "end"].forEach((n) => es.addEventListener(n, onEvent));
+  ["download", "transcribe", "locate", "scan", "verify", "occurrences", "refine", "done", "error", "end"].forEach((n) => es.addEventListener(n, onEvent));
   es.onerror = () => { if (es && es.readyState === EventSource.CLOSED) showError("Lost the connection to the server. Restart it and try again."); };
 });
 $("cancel").addEventListener("click", () => jobId && fetch(`/jobs/${jobId}/cancel`, { method: "POST" }));

@@ -34,6 +34,7 @@
       <span class="tc" id="tc-start">00:00:00</span>
       <div class="bar" id="bar" role="img" aria-label="video timeline">
         <div class="window" id="window" hidden></div>
+        <div class="occ-marks" id="occ-marks"></div>
         <div class="ticks" id="ticks"></div>
         <div class="marker" id="marker" hidden><span class="tc" id="marker-tc"></span></div>
       </div>
@@ -49,9 +50,15 @@
       <li data-stage="transcribe"><b>transcribe</b><span class="msg"></span></li>
       <li data-stage="locate"><b>locate</b><span class="msg"></span></li>
       <li data-stage="scan"><b>scan</b><span class="msg"></span></li>
+      <li data-stage="verify"><b>verify</b><span class="msg"></span></li>
       <li data-stage="refine"><b>refine</b><span class="msg"></span></li>
       <li data-stage="done"><b>done</b><span class="msg"></span></li>
     </ol>
+  </section>
+
+  <section class="block" id="occurrences-block" hidden aria-labelledby="oc-h">
+    <h2 id="oc-h" class="eyebrow">Occurrences</h2>
+    <ol class="occurrences" id="occurrences"></ol>
   </section>
 
   <section class="block" id="transcript-block" hidden aria-labelledby="tr-h">
