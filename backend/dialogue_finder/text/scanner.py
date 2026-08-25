@@ -4,13 +4,14 @@ from typing import Callable
 
 from ..config import Config
 from .matcher import score_contains
-from ..models import Candidate, StageEvent
+from ..models import Candidate, CancelledError, StageEvent
 from .ocr import read_dialogue
 from ..progress import ProgressReporter
 
 
 def coarse_scan(source, extractor, target: str, start_s: float, end_s: float, fps: float, cfg: Config,
-                reporter: ProgressReporter, read: Callable = read_dialogue) -> list[Candidate]:
+                reporter: ProgressReporter, read: Callable = read_dialogue,
+                should_cancel: Callable[[], bool] | None = None) -> list[Candidate]:
     """OCR every (source.fps / fps)-th frame in [start_s, end_s]; return one Candidate per sampled frame."""
     step = max(1, int(round(source.fps / fps)))
     start_idx, end_idx = source.index_for_time(start_s), source.index_for_time(end_s)
@@ -18,6 +19,8 @@ def coarse_scan(source, extractor, target: str, start_s: float, end_s: float, fp
     out: list[Candidate] = []
     best = 0.0
     for sample_num, (i, frame) in enumerate(source.iter_range(start_idx, end_idx, step)):
+        if should_cancel and should_cancel():
+            raise CancelledError("cancelled")
         text = read(extractor, frame, cfg)
         score = score_contains(target, text)
         best = max(best, score)

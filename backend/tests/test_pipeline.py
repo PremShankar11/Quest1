@@ -131,3 +131,54 @@ def test_hybrid_retries_widened_window_not_whole_video(synthetic_clip, tmp_path)
     assert res.frame_index == 120
     assert res.text == window.matched_text
     assert not any("whole video" in e.message for e in reporter.events)
+
+
+def test_download_ok_event_carries_video_facts(synthetic_clip):
+    path, truth = synthetic_clip
+    events = []
+    class Collect:
+        def emit(self, e): events.append(e)
+    class NoMatch:
+        def read(self, image): return ""
+    run(str(path), truth["text"], mode="ocr", local=True, reporter=Collect(), extractor=NoMatch())
+    ok = [e for e in events if e.stage == "download" and e.status == "ok"][0]
+    assert ok.payload["fps"] == 24 and ok.payload["duration_s"] == 15.0 and ok.payload["frame_count"] == 360
+
+
+def test_cancel_raises_pipeline_error(synthetic_clip):
+    from dialogue_finder.pipeline import PipelineError
+    path, truth = synthetic_clip
+    class NoMatch:
+        def read(self, image): return ""
+    with pytest.raises(PipelineError, match="cancelled"):
+        run(str(path), truth["text"], mode="ocr", local=True, extractor=NoMatch(), should_cancel=lambda: True)
+
+
+def test_run_wraps_unexpected_errors_as_pipeline_error(synthetic_clip):
+    from dialogue_finder.pipeline import PipelineError
+    path, truth = synthetic_clip
+    class Boom:
+        def read(self, image): raise ValueError("engine exploded")
+    with pytest.raises(PipelineError, match="engine exploded"):
+        run(str(path), truth["text"], mode="ocr", local=True, extractor=Boom())
+
+
+def test_refine_fallback_events_carry_frame_index(synthetic_clip):
+    from dialogue_finder.models import Window
+    path, truth = synthetic_clip
+    events = []
+    class Collect:
+        def emit(self, e): events.append(e)
+    class NoMatch:
+        def read(self, image): return ""
+    class FakeLocator:
+        def locate(self, video, target): return Window(5.0, 6.0, 0.9, "hi")
+    run(str(path), truth["text"], mode="hybrid", local=True, reporter=Collect(), extractor=NoMatch(), locator=FakeLocator())
+    fb = [e for e in events if e.stage == "refine" and e.status == "fallback"][0]
+    assert fb.payload["frame_index"] == 120
+
+
+def test_default_paths_are_repo_anchored():
+    from dialogue_finder.config import DEFAULT, REPO_ROOT
+    assert DEFAULT.cache_dir == REPO_ROOT / "cache" and DEFAULT.cache_dir.is_absolute()
+    assert (REPO_ROOT / "backend").is_dir()

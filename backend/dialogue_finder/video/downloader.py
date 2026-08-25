@@ -36,7 +36,7 @@ def fetch_video(url: str, cfg: Config, reporter: ProgressReporter) -> Path:
     cfg.cache_dir.mkdir(parents=True, exist_ok=True)
     target = cfg.cache_dir / f"{cache_key(url)}.mp4"
     if target.exists() and target.stat().st_size > 0:
-        reporter.emit(StageEvent("download", "ok", f"cache hit {target.name}", 1.0, {"path": str(target)}))
+        reporter.emit(StageEvent("download", "running", f"cache hit {target.name}", 1.0, {"path": str(target)}))
         return target
     ensure_ffmpeg()
     import yt_dlp
@@ -69,7 +69,7 @@ def fetch_video(url: str, cfg: Config, reporter: ProgressReporter) -> Path:
         if not found:
             raise DownloadError("Download finished but no file was produced.")
         found[0].rename(target)
-    reporter.emit(StageEvent("download", "ok", f"saved {target.name}", 1.0, {"path": str(target)}))
+    reporter.emit(StageEvent("download", "running", f"saved {target.name}", 1.0, {"path": str(target)}))
     return target
 
 

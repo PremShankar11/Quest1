@@ -116,6 +116,44 @@ yt-dlp, static-ffmpeg, opencv-python, rapidocr + onnxruntime, faster-whisper, ra
   silently produced `window=None` and always raised `PipelineError`, even on a video with clear matching
   speech — audio-only mode was unusable stand-alone before this fix.
 
+## Plan 1 — Final review fixes
+
+- AI's `refine_first_frame` treated the coarse-scan sample immediately before a hit as a reliable
+  "text not yet visible" anchor for the binary search. → I changed it to prove that first: hop
+  back up to `MAX_BACK_HOPS` (8) samples while the text is still on screen, looking for a real
+  no-match anchor, before binary-searching between it and the hit. → A coarse sample can itself
+  already contain the text (the scan step can be several frames wide), so binary-searching against
+  it would silently report a frame that isn't actually the first one. When the hop budget runs out
+  still on-screen, the result is reported as the last confirmed-matching hop with `exact=False`;
+  `pipeline.run` turns that into confidence `MEDIUM` and a note ("text already visible at scan
+  start; first frame may be earlier") instead of asserting a frame-exact result it can't back up.
+
+## Plan 2 — Service hardening (2026-08-25)
+
+- AI's first pass left `Config.cache_dir` / `output_dir` as bare relative `Path("cache")` /
+  `Path("output")`. → I changed the defaults to `REPO_ROOT / "cache"` / `REPO_ROOT / "output"`
+  (`REPO_ROOT = Path(__file__).resolve().parents[2]`, computed once from `config.py`'s own
+  location). → A relative path resolves against the process's current working directory, which
+  differs between the CLI (run from `backend/`) and the future FastAPI server (run from wherever
+  `uvicorn` is started) — a real run surfaced exactly this split: the downloaded mp4 landed in
+  `cache/` at the repo root while a transcript landed in `backend/cache/`, two different
+  directories for the same conceptual cache.
+- AI's `pipeline.run` let `DownloadError`, generic Python exceptions, and (via `coarse_scan`) any
+  future cancellation signal all propagate with their native types. → I changed `run()` to raise
+  only `PipelineError`: known failures convert as before, `CancelledError` (a `PipelineError`
+  subclass defined in `models.py`, not `pipeline.py`, so `text/scanner.py` can raise it without a
+  circular import) passes through unchanged, and anything else is caught, logged as an `error`
+  `StageEvent`, and re-raised as `PipelineError(f"unexpected failure (...)")`. → The web API (Plan
+  2, later tasks) needs exactly one exception type to translate into an HTTP error response;
+  without this, every new failure mode downstream (a codec `cv2` doesn't support, a corrupt
+  download, an OCR engine crash) would need its own handler in the API layer instead of one.
+- AI's pipeline had no way to stop a run once started. → I added `should_cancel: Callable[[], bool]
+  | None` threaded through `run()` and `coarse_scan()`, checked after download, after audio
+  locate, and once per OCR sample inside the scan loop. → A browser tab closing mid-run (Plan 2's
+  UI) needs the backend job to actually stop, not keep OCR-scanning a 15-minute video after nobody
+  is listening; checking once per scan sample bounds the worst-case stop latency to a single OCR
+  call (under a second) rather than waiting for the whole scan or transcode to finish.
+
 ## Phase 1 — Build notes
 
 - **static-ffmpeg download can fail on some networks.** `static_ffmpeg.add_paths()` fetches ffmpeg/ffprobe from

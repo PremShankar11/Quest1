@@ -51,6 +51,23 @@ class StageEvent:
     message: str = ""
     progress: float | None = None    # 0..1
     payload: dict[str, Any] = field(default_factory=dict)
+    seq: int = 0
+    t: float = 0.0
+
+
+class PipelineError(Exception):
+    """Fatal, user-facing. The CLI prints str(e) and exits 1.
+
+    Defined here (not in pipeline.py) so text/scanner.py can raise CancelledError, a subclass,
+    without importing pipeline.py -- pipeline.py already imports from models.py, so the reverse
+    import would be circular. pipeline.py re-exports PipelineError for callers that import it
+    from `dialogue_finder.pipeline` (the CLI, tests)."""
+
+
+class CancelledError(PipelineError):
+    """Raised when should_cancel() returns True mid-scan; message is "cancelled". A PipelineError
+    subclass so it propagates through run()'s `except PipelineError: raise` unchanged, and so
+    callers that catch coarse_scan's cancellation directly still see a PipelineError."""
 
 
 @dataclass

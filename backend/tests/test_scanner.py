@@ -1,3 +1,5 @@
+import pytest
+
 from dialogue_finder.config import DEFAULT
 from dialogue_finder.models import Candidate
 from dialogue_finder.progress import NullReporter
@@ -43,3 +45,16 @@ def test_pick_group_first_last_all():
     assert pick_group(groups, "last") == [groups[1]]
     assert pick_group(groups, "all") == groups
     assert pick_group([], "first") == []
+
+
+def test_coarse_scan_stops_when_cancelled():
+    from dialogue_finder.pipeline import PipelineError
+    src = FakeSource()
+    ex = FakeExtractor(lambda i: "")
+    calls = []
+    def cancel():
+        calls.append(1)
+        return len(calls) > 2
+    with pytest.raises(PipelineError, match="cancelled"):
+        coarse_scan(src, ex, "x", 0.0, 9.9, fps=5, cfg=DEFAULT, reporter=NullReporter(),
+                    read=lambda e, f, c: e.read(f), should_cancel=cancel)

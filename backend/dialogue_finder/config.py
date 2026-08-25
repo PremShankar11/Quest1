@@ -1,6 +1,8 @@
 from dataclasses import dataclass, field
 from pathlib import Path
 
+REPO_ROOT = Path(__file__).resolve().parents[2]
+
 
 @dataclass(frozen=True)
 class Config:
@@ -16,8 +18,8 @@ class Config:
     hit_gap_s: float = 2.0            # candidates further apart than this are separate occurrences
     whisper_model: str = "base"
     whisper_task: str = "translate"
-    cache_dir: Path = field(default_factory=lambda: Path("cache"))
-    output_dir: Path = field(default_factory=lambda: Path("output"))
+    cache_dir: Path = field(default_factory=lambda: REPO_ROOT / "cache")
+    output_dir: Path = field(default_factory=lambda: REPO_ROOT / "output")
 
 
 DEFAULT = Config()

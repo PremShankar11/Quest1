@@ -18,7 +18,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--text", required=True, help='target dialogue, e.g. "My mind rebels at stagnation"')
     p.add_argument("--mode", choices=["hybrid", "audio", "ocr"], default="hybrid")
     p.add_argument("--occurrence", choices=["first", "last", "all"], default="first")
-    p.add_argument("--out", default="output", help="output directory (default: output)")
+    p.add_argument("--out", default=None, help="output directory (default: <repo>/output)")
     p.add_argument("--json", action="store_true", help="also print result.json content to stdout")
     p.add_argument("--verbose", "-v", action="store_true")
     return p
@@ -30,7 +30,8 @@ def main(argv: list[str] | None = None) -> int:
         args = parser.parse_args(argv)
     except SystemExit as e:               # argparse exits 2 on usage error
         return int(e.code) if e.code is not None else 2
-    cfg = Config(output_dir=Path(args.out), cache_dir=DEFAULT.cache_dir)
+    out_dir = Path(args.out) if args.out is not None else DEFAULT.output_dir
+    cfg = Config(output_dir=out_dir, cache_dir=DEFAULT.cache_dir)
     try:
         from .pipeline import PipelineError, run
     except Exception as e:                # broken/missing dependency (e.g. opencv DLL load failure)
