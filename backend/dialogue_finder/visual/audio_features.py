@@ -101,13 +101,8 @@ def mfcc_for_video(wav: Path, start_s: float, end_s: float, fps: float) -> np.nd
     n_video_frames = round(duration_s * fps)
     target_rows = 4 * n_video_frames
 
-    if mfcc.shape[0] < target_rows:
-        # Pad with zeros to the target length
-        pad_rows = target_rows - mfcc.shape[0]
-        mfcc = np.vstack([mfcc, np.zeros((pad_rows, numcep), dtype=np.float32)])
-    elif mfcc.shape[0] > target_rows:
-        # Trim to target length
-        mfcc = mfcc[:target_rows]
+    pad_rows = max(0, target_rows - mfcc.shape[0])
+    mfcc = np.pad(mfcc[:target_rows], ((0, pad_rows), (0, 0)))
 
     return mfcc.astype(np.float32)
 
@@ -152,26 +147,19 @@ def speech_mask(wav: Path, start_s: float, end_s: float, fps: float) -> list[boo
     vad_options = VadOptions()
     speech_chunks = get_speech_timestamps(signal, vad_options, sampling_rate=sr)
 
-    # Build a set of sample indices that are marked as speech
-    speech_samples = set()
+    # Build a per-sample speech flag array
+    speech_flags = np.zeros(len(signal), dtype=bool)
     for chunk in speech_chunks:
-        start_sample = chunk["start"]
-        end_sample = chunk["end"]
-        speech_samples.update(range(start_sample, end_sample))
+        speech_flags[chunk["start"]:chunk["end"]] = True
 
-    # Rasterize to video frames
+    # Rasterize to video frames: mark True if the frame's center sample is speech
     duration_s = end_s - start_s
     n_video_frames = round(duration_s * fps)
-    mask = []
+    frame_center_s = (np.arange(n_video_frames) + 0.5) / fps
+    frame_center_sample = (frame_center_s * sr).astype(int)
 
-    for frame_idx in range(n_video_frames):
-        # Center time of this frame (in seconds relative to start_s)
-        frame_center_s = (frame_idx + 0.5) / fps
-        # Convert to sample index within the signal
-        frame_center_sample = int(frame_center_s * sr)
+    mask = np.zeros(n_video_frames, dtype=bool)
+    in_bounds = frame_center_sample < len(speech_flags)
+    mask[in_bounds] = speech_flags[frame_center_sample[in_bounds]]
 
-        # Check if this sample falls in a speech chunk
-        is_speech = frame_center_sample in speech_samples
-        mask.append(is_speech)
-
-    return mask
+    return mask.tolist()
