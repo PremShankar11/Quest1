@@ -11,7 +11,6 @@ from pydantic import BaseModel, Field
 from dialogue_finder.config import DEFAULT, Config
 from dialogue_finder.models import StageEvent
 from dialogue_finder.pipeline import PipelineError, run
-from dialogue_finder.progress import ProgressReporter
 
 DEBOUNCE_S = 0.2
 

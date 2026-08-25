@@ -10,7 +10,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
-from api.jobs import JobRequest, JobStore
+from api.jobs import Job, JobRequest, JobStore
 from dialogue_finder.config import REPO_ROOT
 from dialogue_finder.video.frame_source import FrameSource
 
@@ -32,7 +32,7 @@ def create_job(req: JobRequest) -> dict:
     return {"id": store.create(req).id}
 
 
-def _job(job_id: str):
+def _job(job_id: str) -> Job:
     job = store.get(job_id)
     if job is None:
         raise HTTPException(404, "no such job")
