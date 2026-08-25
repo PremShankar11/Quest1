@@ -8,6 +8,7 @@ Constraints). `crop_face` produces the square grey crop LR-ASD's preprocessing e
 """
 from __future__ import annotations
 
+import hashlib
 import time
 import urllib.error
 import urllib.request
@@ -32,6 +33,9 @@ YUNET_URL = (
     "https://media.githubusercontent.com/media/opencv/opencv_zoo/main/models/"
     "face_detection_yunet/face_detection_yunet_2023mar.onnx"
 )
+# sha256 of the file at YUNET_URL, hashed 2026-08-25. Pinned so a compromised/mirrored/corrupted
+# download is rejected instead of silently loaded into cv2.FaceDetectorYN.
+YUNET_SHA256 = "8f2383e4dd3cfbb4553ea8718107fc0423210dc964f9f4280604804ed2552fa4"
 _DOWNLOAD_ATTEMPTS = 3
 _DOWNLOAD_BACKOFF_S = 1.0
 
@@ -48,6 +52,18 @@ class FaceDetector(Protocol):
     def detect(self, frame: np.ndarray) -> list[tuple[int, int, int, int]]: ...
 
 
+def _verify_yunet_hash(path: Path, expected: str = YUNET_SHA256) -> None:
+    """Raise RuntimeError (and delete `path`) if its sha256 doesn't match `expected`."""
+    actual = hashlib.sha256(path.read_bytes()).hexdigest()
+    if actual != expected:
+        path.unlink(missing_ok=True)
+        raise RuntimeError(
+            f"YuNet model integrity check failed for {path}: expected sha256 {expected}, "
+            f"got {actual}. Deleted the bad file.\n"
+            f"Manual fallback: curl -L -o {path} {YUNET_URL}"
+        )
+
+
 def _download_yunet(dest: Path) -> None:
     dest.parent.mkdir(parents=True, exist_ok=True)
     last_error: Exception | None = None
@@ -57,6 +73,7 @@ def _download_yunet(dest: Path) -> None:
                 data = resp.read()
             tmp = dest.with_name(dest.name + ".part")
             tmp.write_bytes(data)
+            _verify_yunet_hash(tmp)   # not caught below: a hash mismatch is not retried
             tmp.replace(dest)
             return
         except (urllib.error.URLError, OSError) as e:
@@ -83,6 +100,7 @@ class YuNetDetector:
         path = self.models_dir / YUNET_FILENAME
         if not path.exists():
             _download_yunet(path)
+        _verify_yunet_hash(path)   # re-check on every load, not just freshly-downloaded files
         return path
 
     def _ensure(self, w: int, h: int) -> None:

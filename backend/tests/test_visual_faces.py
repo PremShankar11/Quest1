@@ -1,8 +1,10 @@
+import hashlib
+
 import numpy as np
 import pytest
 
 from dialogue_finder.config import DEFAULT, REPO_ROOT
-from dialogue_finder.visual.faces import IouTracker, build_tracks, crop_face
+from dialogue_finder.visual.faces import IouTracker, _verify_yunet_hash, build_tracks, crop_face
 
 
 class FakeSrc:
@@ -52,6 +54,22 @@ def test_crop_face_is_square_grey_sized():
     frame = np.zeros((360, 640, 3), dtype=np.uint8)
     c = crop_face(frame, (300, 100, 50, 70), 112)
     assert c.shape == (112, 112) and c.dtype == np.uint8
+
+
+def test_verify_yunet_hash_rejects_wrong_bytes_and_deletes_file(tmp_path):
+    bad = tmp_path / "bad.onnx"
+    bad.write_bytes(b"not the real model")
+    with pytest.raises(RuntimeError, match="integrity check failed"):
+        _verify_yunet_hash(bad)
+    assert not bad.exists()
+
+
+def test_verify_yunet_hash_accepts_matching_bytes(tmp_path):
+    good = tmp_path / "good.onnx"
+    good.write_bytes(b"known content for hash check")
+    expected = hashlib.sha256(good.read_bytes()).hexdigest()
+    _verify_yunet_hash(good, expected=expected)   # no raise
+    assert good.exists()
 
 
 @pytest.mark.slow
