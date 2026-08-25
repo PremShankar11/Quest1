@@ -297,3 +297,41 @@ def test_hybrid_uncertain_when_no_faces_detected(synthetic_clip, tmp_path, monke
     assert res.occurrence_class == "uncertain"
     assert res.frame_index == round(8.0 * 24)   # first spoken word of the higher-ASR (0.95) window
     assert res.speaker_box is None
+
+
+class FakeConstantOcrExtractor:
+    """TextExtractor that always reads the same (OCR-cased) text, regardless of frame content."""
+    def __init__(self, text: str) -> None:
+        self._text = text
+
+    def read(self, image) -> str:
+        return self._text
+
+
+def test_hybrid_valid_text_reports_ocr_text_not_asr_text(synthetic_clip, tmp_path, monkeypatch):
+    """Fix round 1: `valid-text` occurrences must report the OCR-extracted text (their own
+    evidence), not the ASR window's `matched_text` -- every other route already reports the text
+    of its own evidence (audio -> matched_text, audio+asd -> would be visual, no text)."""
+    _patch_hybrid_extras(monkeypatch, FakeBoxDetector(), FakeCountingSpeaker([0.0]))
+    path, truth = synthetic_clip
+    ocr_text = "MY MIND REBELS AT STAGNATION"
+    window = Window(5.0, 5.5, 0.95, truth["text"])
+    cfg = DEFAULT.__class__(output_dir=tmp_path / "out_h3", cache_dir=tmp_path / "cache_h3")
+    res = run(str(path), truth["text"], cfg=cfg, mode="hybrid", local=True,
+             extractor=FakeConstantOcrExtractor(ocr_text), locator=FakeLocatorAll([window]))
+
+    assert res.occurrence_class == "valid-text"
+    assert res.text == ocr_text
+    assert res.text != window.matched_text
+
+
+def test_audio_ocr_locate_payload_has_no_windows_key(synthetic_clip, tmp_path):
+    """Fix round 1: the `windows` payload key must only appear for mode="hybrid" so the old
+    modes' `locate ok` events stay byte-identical."""
+    path, truth = synthetic_clip
+    cfg = DEFAULT.__class__(output_dir=tmp_path / "out_locate", cache_dir=tmp_path / "cache_locate")
+    reporter = CollectingReporter()
+    run(str(path), truth["text"], cfg=cfg, mode="audio+ocr", local=True,
+       extractor=FakeNoMatch(), locator=FakeLocator(), reporter=reporter)
+    locate_ok = [e for e in reporter.events if e.stage == "locate" and e.status == "ok"]
+    assert locate_ok and set(locate_ok[0].payload.keys()) == {"window"}

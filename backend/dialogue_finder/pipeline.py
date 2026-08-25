@@ -154,7 +154,8 @@ def _run_hybrid(src: FrameSource, video: Path, windows: list[Window], target: st
                               o.window.score) for o in alt_occs]
 
     return _finish(src, cfg, reporter, timings, t0, selected.frame_index, "hybrid result",
-                   timestamp_s=src.time_for_index(selected.frame_index), text=selected.window.matched_text,
+                   timestamp_s=src.time_for_index(selected.frame_index),
+                   text=selected.text or selected.window.matched_text,
                    confidence=confidence_for_occurrence(selected),
                    source=_SOURCE_FOR_CLASS.get(selected.klass, "audio"), note=selected.note,
                    window=selected.window, occurrence_class=selected.klass, speaker_box=speaker_box,
@@ -218,9 +219,12 @@ def run(source_spec: str, target: str, *, cfg: Config = DEFAULT, reporter: Progr
                     if window is None:
                         reporter.emit(StageEvent("locate", "fallback", "no audio match; will scan whole video"))
                     else:
+                        payload = {"window": window.__dict__}
+                        if hybrid_ready:                       # only mode="hybrid" ever populates `windows`
+                            payload["windows"] = len(windows)
                         reporter.emit(StageEvent("locate", "ok", f"window {window.start_s:.1f}-{window.end_s:.1f}s "
                                                  f"score {window.score:.2f}: '{window.matched_text}'", 1.0,
-                                                 {"window": window.__dict__, "windows": len(windows)}))
+                                                 payload))
                 except Exception as e:
                     reporter.emit(StageEvent("locate", "fallback", f"audio stage failed: {e}"))
                     window = None

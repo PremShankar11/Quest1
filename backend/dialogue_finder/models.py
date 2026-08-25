@@ -81,6 +81,7 @@ class Occurrence:
     asd_mean: float
     speaker_box: tuple[int, int, int, int] | None
     note: str = ""
+    text: str = ""                   # the occurrence's own evidence text (OCR text for valid-text; "" otherwise)
 
     def to_dict(self) -> dict[str, Any]:
         """asdict() already recurses into `window` (a nested dataclass), turning it into a

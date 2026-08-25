@@ -165,7 +165,8 @@ def _ocr_occurrence(src, window: Window, target: str, extractor, a: float, b: fl
     ocr_cand, exact = refine_first_frame(src, extractor, target, first_hit.frame_index, prev_index, cfg, step=step)
     note = "" if exact else "text already visible at scan start; first frame may be earlier"
     return Occurrence(window=window, klass="valid-text", frame_index=ocr_cand.frame_index,
-                      ocr_score=ocr_cand.score, faces=0, asd_mean=0.0, speaker_box=None, note=note)
+                      ocr_score=ocr_cand.score, faces=0, asd_mean=0.0, speaker_box=None, note=note,
+                      text=ocr_cand.text)
 
 
 def _score_tracks(src, detector: FaceDetector, speaker: SpeakerDetector, wav, a: float, b: float,
