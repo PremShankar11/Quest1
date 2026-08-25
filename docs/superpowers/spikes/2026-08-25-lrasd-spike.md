@@ -60,6 +60,8 @@ probs = torch.softmax(head(outsAV), dim=-1)[:, 1]   # in [0, 1]; asd_threshold (
 ```
 The upstream demo script (`Columbia_test.py`, `evaluate_network` + `visualization`) instead colours faces using `raw_logit = head(outsAV)[:, 1]` thresholded at `>= 0`, which is **not equivalent** — `softmax(x)[1] >= 0.5 ⟺ x[1] >= x[0]`, not `x[1] >= 0`. That raw-logit/`>=0` rule is a demo-only visualization shortcut from the code path taken when `labels=None`; the code path taken during evaluation *with* labels (`ASD.evaluate_network` in `ASD.py`) computes the same `softmax(x)[:, 1]` this spike uses. The spike printed both columns (`prob`, `raw`) per frame; they agree on sign of separation but only `prob` is a calibrated 0..1 score comparable to `config.py`'s `asd_threshold: 0.5`.
 
+**Correction (Task 1 review):** calling the raw-logit `>= 0` rule a "demo-only visualization shortcut" understates it — upstream's published Columbia ASD F1 scores (96.4% / 86.1%, see the `weights` heading) were themselves computed with exactly that rule via `Columbia_test.py`, so it is upstream's actual benchmark methodology, not a cosmetic aside; this codebase deliberately uses the softmax probability instead, which is why `asd_threshold` here is a genuine calibrated probability rather than a reproduction of upstream's benchmark numbers.
+
 ## preprocessing
 
 - **Face crop → model input:** replicate `Columbia_test.py`'s `crop_video` geometry exactly, per frame's largest YuNet bbox `(x, y, w, h)`:
