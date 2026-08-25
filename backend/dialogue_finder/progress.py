@@ -20,6 +20,8 @@ class PrintReporter:
         self.verbose = verbose
 
     def emit(self, event: StageEvent) -> None:
+        if event.stage == "error":
+            return   # cli.main already prints its own "Error: ..." line for PipelineError; avoid duplicating it
         if event.progress is not None and not self.verbose:
             return
         tag = f"[{event.stage}:{event.status}]"

@@ -32,6 +32,24 @@ def test_corrupt_file_is_clean(capsys, tmp_path):
     assert "Traceback" not in capsys.readouterr().err
 
 
+def test_extractor_failure_prints_error_once(capsys, synthetic_clip, monkeypatch):
+    """A mid-scan extractor crash must reach the CLI as a single clean 'Error:' line -- not
+    duplicated by PrintReporter re-printing the pipeline's internal StageEvent("error", ...)."""
+    path, truth = synthetic_clip
+
+    class Boom:
+        def read(self, image):
+            raise ValueError("engine exploded")
+
+    monkeypatch.setattr("dialogue_finder.pipeline._default_extractor", lambda: Boom())
+    code = main(["--local", str(path), "--text", truth["text"], "--mode", "ocr"])
+    assert code == 1
+    err = capsys.readouterr().err
+    error_lines = [line for line in err.splitlines() if line.startswith("Error:")]
+    assert len(error_lines) == 1
+    assert "Traceback" not in err
+
+
 @pytest.mark.slow
 def test_output_write_failure_is_clean(capsys, tmp_path, synthetic_clip, monkeypatch):
     """Ruling (a): a successful run whose result.json write fails must print
