@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from typing import Iterator
 
 from rapidfuzz import fuzz
 
@@ -35,19 +36,27 @@ def score_similar(a: str, b: str) -> float:
     return fuzz.token_sort_ratio(a, b) / 100.0
 
 
-def all_word_windows(words: list[Word], target: str, threshold: float, cap: int) -> list[Window]:
-    """Every non-overlapping span scoring >= threshold, best first (greedy: take the best, drop
-    overlaps, repeat)."""
+def _scored_spans(words: list[Word], target: str) -> Iterator[Window]:
+    """Every window of ~len(target words) sliding over `words`, scored against `target`.
+
+    Shared by `best_word_window` (best score wins) and `all_word_windows` (all spans above
+    a threshold, deduped to non-overlapping). Order is size-ascending then start-ascending,
+    which callers that break ties by iteration order (e.g. `max()`) rely on.
+    """
     n = max(1, len(normalize(target).split()))
-    spans: list[Window] = []
     for size in range(max(1, n - 1), n + 3):
         for i in range(0, max(1, len(words) - size + 1)):
             span = words[i:i + size]
             if not span:
                 continue
-            s = score_similar(target, " ".join(w.text for w in span))
-            if s >= threshold:
-                spans.append(Window(span[0].start, span[-1].end, s, " ".join(w.text for w in span)))
+            text = " ".join(w.text for w in span)
+            yield Window(span[0].start, span[-1].end, score_similar(target, text), text)
+
+
+def all_word_windows(words: list[Word], target: str, threshold: float, cap: int) -> list[Window]:
+    """Every non-overlapping span scoring >= threshold, best first (greedy: take the best, drop
+    overlaps, repeat)."""
+    spans = [w for w in _scored_spans(words, target) if w.score >= threshold]
     spans.sort(key=lambda w: (-w.score, w.start_s))
     chosen: list[Window] = []
     for w in spans:
@@ -60,17 +69,4 @@ def all_word_windows(words: list[Word], target: str, threshold: float, cap: int)
 
 def best_word_window(words: list[Word], target: str) -> Window | None:
     """Slide windows of ~len(target words) over the transcript; return the best-scoring span."""
-    if not words:
-        return None
-    n = max(1, len(normalize(target).split()))
-    best: Window | None = None
-    for size in range(max(1, n - 1), n + 3):
-        for i in range(0, max(1, len(words) - size + 1)):
-            span = words[i:i + size]
-            if not span:
-                continue
-            text = " ".join(w.text for w in span)
-            s = score_similar(target, text)
-            if best is None or s > best.score:
-                best = Window(span[0].start, span[-1].end, s, text)
-    return best
+    return max(_scored_spans(words, target), key=lambda w: w.score, default=None)
