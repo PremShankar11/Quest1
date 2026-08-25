@@ -557,26 +557,41 @@ Model load (~0.04-0.1 s) is one-time per process, not counted per window. ~10x u
 **Task 6 (real `IouTracker`/`verify_window`, one window, episode):** verify stage ≈26.4 s for a
 single ~2.7 s window padded to ~8.7 s (325.1-327.8 s ± `window_pad_s`).
 
-**Task 8 (this task, real end-to-end runs):**
+**Task 8 (this task, real end-to-end runs, first pass — before the OCR-retry fix below):**
 
 | Run | Window duration (padded) | `verify` stage time | Notes |
 |---|---|---|---|
-| Episode, `--mode hybrid` (default) | ~2.66 s → ~8.7 s padded | **28.39 s** | one candidate window; `locate_all` found only one span ≥0.6 for this line |
-| Squid Game clip, `--mode hybrid` | ~5.0 s → ~11.0 s padded | included in 62.8 s wall time | one window; OCR misses in-window (see Limits), falls through to face+ASD scoring |
-| Voice-over clip (iguana/snakes, no faces), `--mode hybrid` | ~4.18 s → ~10.2 s padded | **47.18 s** | no faces detected at all — YuNet ran the full padded window, LR-ASD never invoked (0 tracks to score) |
+| Episode, `--mode hybrid` (default) | ~2.66 s → ~8.7 s padded | 28.39 s | one candidate window; `locate_all` found only one span ≥0.6 for this line; OCR missed once (padded window only), fell through to face+ASD scoring |
+| Squid Game clip, `--mode hybrid` | ~5.0 s → ~11.0 s padded | included in 62.8 s wall time | one window; OCR missed in-window (padded-window-only scan, pre-fix), fell through to face+ASD scoring — see Validation run 3 |
+| Voice-over clip (iguana/snakes, no faces), `--mode hybrid` | ~4.18 s → ~10.2 s padded | 47.18 s | no faces detected at all — YuNet ran the full padded window, LR-ASD never invoked (0 tracks to score) |
 
-Per-window cost scales with window duration as the spike predicted, and stays one to two orders
-of magnitude below a whole-video pass; the earlier "worth a coarse check against real
-episode-length runs" concern (spike note, `decision`, concern 1) is resolved — these are the real
-episode-length numbers.
+**Re-run after commit `2957461`** (`_ocr_occurrence` now retries a missed padded-window OCR scan
+over the widened window — `±retry_pad_s`, 15 s — at `fullscan_fps`, matching `audio+ocr`'s
+pipeline-level fallback exactly):
+
+| Run | Window duration (padded) | `verify` stage time | Notes |
+|---|---|---|---|
+| Episode, `--mode hybrid` (default) | ~2.66 s → ~8.7 s padded | **68.87 s** (was 28.39 s) | same answer (frame 7801, `valid-speaker`) — cost rose because OCR now also runs the widened retry (~66 samples at `fullscan_fps=2.0` over the ~33 s retry window) before falling through to face+ASD scoring, where before it gave up after the padded-window scan alone |
+| Squid Game clip, `--mode hybrid` | ~5.0 s → ~11.0 s padded, widened retry 10-45 s | **not separately isolated** (OCR hit inside the widened retry, no face+ASD stage reached) | now resolves in the OCR stage — see Validation run 3 |
+
+Per-window cost scales with window duration and, now, whether the widened OCR retry fires; it
+stays one to two orders of magnitude below a whole-video pass. The earlier "worth a coarse check
+against real episode-length runs" concern (spike note, `decision`, concern 1) is resolved —
+these are the real episode-length numbers, both before and after the retry fix.
 
 ### Validation (real runs, this task)
 
+Run 3 was re-run against commit `2957461` (`fix: hybrid OCR uses the widened-window retry (parity
+with audio+ocr)`) after the first pass below surfaced a real gap; run 1 was re-run against the same
+commit to confirm the fix didn't change the already-correct `valid-speaker` answer. Both re-runs are
+folded into the table (marked "post-fix"); the original numbers are kept in the Measured costs
+table above and in DECISIONS.md for the record.
+
 | # | Command (essentials) | Expected | Actual | Time | Correct? |
 |---|---|---|---|---|---|
-| 1 | episode, `--mode hybrid` (default) | `valid-speaker`, `audio+asd`, onset near frame 7794 | `valid-speaker` / `audio+asd` / **frame 7801** (+7 frames ≈ +0.29 s after the audio word-start 7794) / `Speaker: 218,-15,304,410` | wall 31.9 s (verify 28.39 s) | yes — onset trails the word start by a fraction of a second, the expected direction (mouth movement lags the transcribed word boundary) |
+| 1 | episode, `--mode hybrid` (default) | `valid-speaker`, `audio+asd`, onset near frame 7794 | `valid-speaker` / `audio+asd` / **frame 7801** (+7 frames ≈ +0.29 s after the audio word-start 7794) / `Speaker: 218,-15,304,410` — unchanged post-fix (re-run wall 72.4 s, verify 68.87 s, up from 31.9 s/28.39 s because OCR now also runs the widened retry before falling through to face+ASD scoring) | wall 72.4 s (post-fix) | yes — onset trails the word start by a fraction of a second, the expected direction (mouth movement lags the transcribed word boundary) |
 | 2 | same episode line, `--mode audio+ocr` | byte-identical to the pre-rename `hybrid` answer | `audio` / frame **7794** / 00:05:25.073 / MEDIUM — exact match | wall 70.6 s | yes — proves the renamed old mode is untouched |
-| 3 | Squid Game clip, `--mode hybrid` | `valid-text`, frame 297 (spec §8 assumption) | **`invalid`** / `audio` / frame 737 / LOW — "faces visible but none speaking" | wall 62.8 s | **diverges from the brief's expectation** — see Limits below; confirmed **not** a regression by rerunning `--mode audio+ocr` on the same clip: still `ocr` / frame **297** / HIGH, byte-identical to Phase 4's matrix |
+| 3 | Squid Game clip, `--mode hybrid` | `valid-text`, frame 297 (spec §8 assumption) | **First pass (pre-fix): `invalid`** / `audio` / frame 737 / LOW — "faces visible but none speaking" (wall 62.8 s). **Post-fix (commit `2957461`): `valid-text`** / `ocr` / **frame 297** / HIGH, `Text: "In my town, we had a game called the "Squid Game.""` — matches expectation exactly | wall 98.6 s (post-fix) | **post-fix: yes.** Pre-fix run confirmed **not** a regression at the time by cross-checking `--mode audio+ocr` on the same clip: still `ocr` / frame **297** / HIGH — see DECISIONS.md for what the fix changed |
 | 4 | voice-over clip (BBC Earth, *Iguana vs Snakes*, [youtube.com/watch?v=el4CQj-TCbA](https://www.youtube.com/watch?v=el4CQj-TCbA), line "On flat ground, a baby iguana can outrun a racer snake.") | `invalid` or `uncertain` | **`uncertain`** / `audio` / frame 735 / MEDIUM — "no usable face in the window" (0 faces detected — all-animal footage, no human on screen at all) | wall 51.5 s (verify 47.18 s) | yes — one of the two documented acceptable outcomes |
 | 5 | episode line, extras monkeypatched unavailable (`asd_available` forced `(False, ...)`), no uninstall | `[verify:skipped]`, answer identical to `audio+ocr` | `[verify:skipped] requirements-asd.txt not installed`, then `audio` / frame **7794** / MEDIUM — exact match to run 2 | wall 66.1 s | yes |
 
@@ -599,17 +614,19 @@ python -c "import dialogue_finder.pipeline as p, sys; p.asd_available = lambda *
 
 - **Onset timing: ≈±0.25 s.** Same root cause as the alignment fix above — native 23.976 fps
   video fed to a 25-fps-trained model — documented, not "fixed" by an extra resample pass.
-- **Per-window OCR does not retry on a widened window.** `audio+ocr`'s pipeline-level fallback
-  widens a missed OCR scan by `±retry_pad_s` (15 s); `verify_window` (hybrid's per-window path)
-  only scans `window ± window_pad_s` (3 s) — it never widens. **Found by this task's run 3**: the
-  Squid Game clip's audio locate lands on a garbled Korean-to-English translation window
-  (24.6-29.6 s, score 0.63) that doesn't contain the caption at all; the caption actually sits at
-  9.9 s (frame 297), 15 s outside the padded window, only reachable by the widened retry that
-  `audio+ocr` has and `hybrid` does not. Result: on this clip, the new default mode (`hybrid`)
-  gives a *worse* answer (`invalid`/LOW) than the old mode (`audio+ocr`, `valid-text`/HIGH) —
-  user-visible, and not what spec §8's expected outcome assumed. This is a real, documented gap,
-  not a bug fixed by this task (docs-only scope); the fix (teaching `verify_window` the same
-  widened-retry rescue) is future work, not built here.
+- **Found in validation, fixed: per-window OCR now retries on a widened window.** This task's
+  first validation pass (run 3) found that `verify_window` (hybrid's per-window OCR path) only ever
+  scanned `window ± window_pad_s` (3 s), unlike `audio+ocr`'s pipeline-level fallback, which widens
+  a missed OCR scan by `±retry_pad_s` (15 s) before giving up. The Squid Game clip's audio locate
+  lands on a garbled Korean-to-English translation window (24.6-29.6 s, score 0.63) that doesn't
+  contain the caption at all; the caption actually sits at 9.9 s (frame 297), 15 s outside the
+  padded window — reachable only by the widened retry. Before the fix, `hybrid` (the new default)
+  gave a *worse* answer on this clip (`invalid`/LOW/frame 737) than `audio+ocr` (`valid-text`/
+  HIGH/frame 297) — user-visible regression risk on the exact clip spec §8 named as the expected
+  hybrid win. Fixed in commit `2957461` (`_ocr_occurrence` now calls the same
+  `retry_ocr_scan_if_missed` helper `audio+ocr` uses); re-validated with the same clip and command
+  — now `valid-text` / frame 297 / HIGH, matching spec §8 exactly (Validation run 3, post-fix). See
+  DECISIONS.md for the first-person account of what the validation caught and what changed.
 - **Profile faces.** YuNet detects side-on faces less reliably than frontal ones, and LR-ASD's
   training data skews frontal/near-frontal (Columbia/AVA benchmarks); a face that's genuinely
   speaking but heavily profiled can under-score and land as `invalid` rather than `valid-speaker`.

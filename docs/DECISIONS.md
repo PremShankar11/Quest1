@@ -236,15 +236,28 @@ yt-dlp, static-ffmpeg, opencv-python, rapidocr + onnxruntime, faster-whisper, ra
   to the same `invalid` bucket as a real "narrator, not the person on screen" case. The
   classification table keeps them as two separate classes: `uncertain` (no usable track) vs
   `invalid` (a usable track exists, none qualifies).
-- AI's `verify_window` runs OCR + face/ASD scoring only inside the *same padded window* Whisper's
-  `locate_all()` returned (± `window_pad_s`, 3 s), never widened. → I accepted this as a documented
-  limit rather than asking for a fix in this task. → This task's own validation (run 3, the Squid
-  Game clip) is what surfaced it: the audio locate window landed on a garbled Korean-to-English
-  translation span that doesn't contain the on-screen caption at all, and only `audio+ocr`'s
-  separate ±15 s widened-retry fallback (a Plan 1 mechanism `verify_window` never inherited) rescues
-  it. The result is user-visible — the new default mode gives a worse answer than the old mode on
-  that one clip — and is written up as a Limit in APPROACH.md Phase 7 rather than silently patched,
-  since this task's scope is docs and validation, not code.
+- AI's `verify_window` ran OCR + face/ASD scoring only inside the *same padded window* Whisper's
+  `locate_all()` returned (± `window_pad_s`, 3 s), never widened. → This task's own validation (run
+  3, the Squid Game clip) is what caught it: `--mode hybrid` returned `invalid`/LOW/frame 737
+  ("faces visible but none speaking") where the brief and spec §8 both expected `valid-text`/frame
+  297 — the audio locate window landed on a garbled Korean-to-English translation span (24.6-29.6 s,
+  score 0.63) that doesn't contain the on-screen caption at all; the caption actually sits at 9.9 s
+  (frame 297), 15 s outside the padded window. `audio+ocr` finds it (a cross-check I ran on the same
+  clip immediately confirmed `ocr`/HIGH/frame 297, unchanged) because its pipeline-level fallback
+  widens a missed OCR scan by `±retry_pad_s` (15 s) before giving up — a mechanism `verify_window`
+  never inherited. I first wrote this up as a documented Limit rather than a fix, since this task's
+  own scope is docs and validation, not code — but flagged it as the leading concern precisely
+  because the new *default* mode was giving a worse answer than the old mode on the clip the spec
+  itself cites as hybrid's proof case. → I had it fixed in commit `2957461`
+  (`_ocr_occurrence` in `visual/verifier.py` now calls the same `retry_ocr_scan_if_missed` helper
+  `audio+ocr`'s pipeline path uses, instead of giving up after one padded-window scan) rather than
+  leave a known-worse default in place. → Re-validated with the identical command: `--mode hybrid`
+  on the Squid Game clip now returns `valid-text`/HIGH/frame 297, matching spec §8 exactly; the
+  episode run (validation run 1) was re-run too and still lands on frame 7801/`valid-speaker`,
+  confirming the fix only added the missing retry path and didn't disturb the already-correct
+  face/ASD route (verify-stage cost rose from 28.39 s to 68.87 s on that run, since OCR's widened
+  retry now runs before falling through to face scoring — a fair trade for correctness). See
+  APPROACH.md Phase 7 (Measured costs, Validation, Limits) for the full before/after numbers.
 - AI's LR-ASD probability rule, read naively off the upstream demo script, would have thresholded
   the *raw logit* (`head(outsAV)[:, 1] >= 0`) the way `Columbia_test.py`'s visualization does. → I
   had the spike correct this to the calibrated **softmax probability**
