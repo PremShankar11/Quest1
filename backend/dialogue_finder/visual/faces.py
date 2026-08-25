@@ -9,9 +9,6 @@ Constraints). `crop_face` produces the square grey crop LR-ASD's preprocessing e
 from __future__ import annotations
 
 import hashlib
-import time
-import urllib.error
-import urllib.request
 from pathlib import Path
 from typing import Callable, Protocol
 
@@ -19,6 +16,7 @@ import cv2
 import numpy as np
 
 from ..config import Config
+from .model_files import fetch_verified
 from ..models import CancelledError, FaceTrack, StageEvent
 from ..progress import ProgressReporter
 
@@ -36,8 +34,6 @@ YUNET_URL = (
 # sha256 of the file at YUNET_URL, hashed 2026-08-25. Pinned so a compromised/mirrored/corrupted
 # download is rejected instead of silently loaded into cv2.FaceDetectorYN.
 YUNET_SHA256 = "8f2383e4dd3cfbb4553ea8718107fc0423210dc964f9f4280604804ed2552fa4"
-_DOWNLOAD_ATTEMPTS = 3
-_DOWNLOAD_BACKOFF_S = 1.0
 
 PROGRESS_EVERY = 24   # frames between "verify running" progress events in build_tracks
 
@@ -65,26 +61,7 @@ def _verify_yunet_hash(path: Path, expected: str = YUNET_SHA256) -> None:
 
 
 def _download_yunet(dest: Path) -> None:
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    last_error: Exception | None = None
-    for attempt in range(_DOWNLOAD_ATTEMPTS):
-        try:
-            with urllib.request.urlopen(YUNET_URL, timeout=30) as resp:
-                data = resp.read()
-            tmp = dest.with_name(dest.name + ".part")
-            tmp.write_bytes(data)
-            _verify_yunet_hash(tmp)   # not caught below: a hash mismatch is not retried
-            tmp.replace(dest)
-            return
-        except (urllib.error.URLError, OSError) as e:
-            last_error = e
-            if attempt < _DOWNLOAD_ATTEMPTS - 1:
-                time.sleep(_DOWNLOAD_BACKOFF_S * (2 ** attempt))
-    raise IOError(
-        f"Could not download YuNet model from {YUNET_URL} to {dest} after "
-        f"{_DOWNLOAD_ATTEMPTS} attempts: {last_error}\n"
-        f"Manual fallback: curl -L -o {dest} {YUNET_URL}"
-    ) from last_error
+    fetch_verified(YUNET_URL, dest, _verify_yunet_hash, "YuNet model")
 
 
 class YuNetDetector:

@@ -23,15 +23,13 @@ from __future__ import annotations
 
 import hashlib
 import importlib.util
-import time
-import urllib.error
-import urllib.request
 from pathlib import Path
 from typing import Protocol
 
 import numpy as np
 
 from ..config import DEFAULT as _DEFAULT_CONFIG
+from .model_files import fetch_verified
 
 _LRASD_COMMIT = "1b6dcd2d8fc2895683de6508ec6294ec47d388ca"
 # Ordinary git blobs at this commit (confirmed not Git-LFS-tracked in the spike), so a plain
@@ -52,9 +50,6 @@ _WEIGHTS_SHA256 = {
 # footage) separation than pretrain_AVA -- 100% of speaking frames crossed asd_threshold vs
 # 82%, same zero false positives on the quiet span.
 DEFAULT_WEIGHTS = "finetuning_TalkSet.model"
-
-_DOWNLOAD_ATTEMPTS = 3
-_DOWNLOAD_BACKOFF_S = 1.0
 
 
 class SpeakerDetector(Protocol):
@@ -93,29 +88,13 @@ def _verify_weights(path: Path, name: str) -> None:
 
 
 def _download_weights(dest: Path, name: str) -> None:
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    url = _weights_url(name)
-    last_error: Exception | None = None
-    for attempt in range(_DOWNLOAD_ATTEMPTS):
-        try:
-            with urllib.request.urlopen(url, timeout=30) as resp:
-                data = resp.read()
-            tmp = dest.with_name(dest.name + ".part")
-            tmp.write_bytes(data)
-            _verify_weights(tmp, name)   # deletes tmp and raises on mismatch; not retried below
-            tmp.replace(dest)
-            return
-        except WeightsVerificationError:
-            raise
-        except (urllib.error.URLError, OSError) as e:
-            last_error = e
-            if attempt < _DOWNLOAD_ATTEMPTS - 1:
-                time.sleep(_DOWNLOAD_BACKOFF_S * (2 ** attempt))
-    raise IOError(
-        f"Could not download LR-ASD weights ({name}) from {url} to {dest} after "
-        f"{_DOWNLOAD_ATTEMPTS} attempts: {last_error}\n"
-        f"Manual fallback: curl -L -o {dest} {url}"
-    ) from last_error
+    fetch_verified(
+        _weights_url(name),
+        dest,
+        lambda tmp: _verify_weights(tmp, name),
+        f"LR-ASD weights ({name})",
+        reraise=(WeightsVerificationError,),   # a hash mismatch is not retried
+    )
 
 
 def _ensure_weights(models_dir: Path, name: str) -> Path:
