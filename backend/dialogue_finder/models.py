@@ -161,7 +161,7 @@ class Result:
             lines.append(f"Occurrence: {self.occurrence_class}")
         if self.speaker_box:
             x, y, w, h = self.speaker_box
-            lines.append(f"Speaker  : {x},{y},{w},{h}")
+            lines.append(f"Speaker   : {x},{y},{w},{h}")
         return "\n".join(lines)
 
     def to_dict(self) -> dict[str, Any]:

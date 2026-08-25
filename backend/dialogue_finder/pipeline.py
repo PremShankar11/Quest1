@@ -6,25 +6,20 @@ from typing import Callable, TYPE_CHECKING
 
 import cv2
 
+from .audio.locator import extract_audio
 from .config import DEFAULT, Config
 from .video.downloader import DownloadError, fetch_video, probe
 from .video.frame_source import FrameSource
-from .models import Candidate, PipelineError, Result, StageEvent, Window
+from .models import Candidate, Occurrence, PipelineError, Result, StageEvent, Window
 from .progress import NullReporter, ProgressReporter
 from .text.refiner import classify_appearance, refine_first_frame
 from .text.scanner import coarse_scan, group_hits, pick_group
+from .visual.faces import YuNetDetector
+from .visual.lrasd import LrAsdDetector, asd_available
+from .visual.verifier import confidence_for_occurrence, verify_window
 
 if TYPE_CHECKING:
     from .text.ocr import TextExtractor
-
-
-def asd_available() -> tuple[bool, str]:
-    """Whether the active-speaker (LR-ASD) extras are installed and ready to use.
-
-    Placeholder for Task 2: `hybrid` mode has no verify stage yet, so this is never called by
-    `run()` -- it exists only so the Task 6 xfail test in test_pipeline.py can monkeypatch it
-    ahead of time. Task 6 replaces this with `from .visual.lrasd import asd_available`."""
-    return (False, "visual stage not implemented yet")
 
 
 def _check_cancel(should_cancel: Callable[[], bool] | None) -> None:
@@ -66,6 +61,18 @@ def _save_frame_images(src: FrameSource, index: int, cfg: Config) -> tuple[str, 
     return str(p), prev
 
 
+def _save_speaker_image(src: FrameSource, index: int, box: tuple[int, int, int, int], cfg: Config) -> str:
+    """Write the result frame with a 2 px teal rectangle around `box` as `frame_<n>_speaker.png`
+    (controller ruling: teal (197, 209, 79) BGR)."""
+    frame = src.frame_at(index).copy()
+    x, y, w, h = box
+    cv2.rectangle(frame, (x, y), (x + w, y + h), (197, 209, 79), 2)
+    cfg.output_dir.mkdir(parents=True, exist_ok=True)
+    p = cfg.output_dir / f"frame_{index}_speaker.png"
+    _write_png(p, frame)
+    return str(p)
+
+
 def _default_extractor() -> TextExtractor:
     from .text.ocr import RapidOCRExtractor
     return RapidOCRExtractor()
@@ -89,6 +96,69 @@ def _finish(src: FrameSource, cfg: Config, reporter: ProgressReporter, timings: 
     reporter.emit(StageEvent("done", "ok", done_msg))
     return Result(frame_index=frame_index, fps=src.fps, image_path=img, prev_image_path=prev,
                  timings_s=timings, **result_kwargs)
+
+
+_CLASS_TIER = {"valid-text": 0, "valid-speaker": 0, "uncertain": 1, "invalid": 2}
+_SOURCE_FOR_CLASS = {"valid-text": "ocr", "valid-speaker": "audio+asd"}
+
+
+def _select_occurrence(occurrences: list[Occurrence], occurrence: str) -> tuple[Occurrence, list[Occurrence]]:
+    """class order valid > uncertain > invalid; within the selected class, `occurrence` picks:
+    "first"/"all" -> highest ASR score then earliest window (the plan's default selection
+    order); "last" -> the temporally last window of that class. "all" reports that same pick and
+    returns the rest of the class as alternatives (controller ruling); "first"/"last" return no
+    alternatives."""
+    best_tier = min(_CLASS_TIER[o.klass] for o in occurrences)
+    in_class = [o for o in occurrences if _CLASS_TIER[o.klass] == best_tier]
+    ranked = sorted(in_class, key=lambda o: (-o.window.score, o.window.start_s))
+    if occurrence == "last":
+        return max(in_class, key=lambda o: o.window.start_s), []
+    if occurrence == "all":
+        return ranked[0], ranked[1:]
+    return ranked[0], []
+
+
+def _run_hybrid(src: FrameSource, video: Path, windows: list[Window], target: str, ex,
+                cfg: Config, reporter: ProgressReporter, timings: dict[str, float], t0: float,
+                occurrence: str, should_cancel: Callable[[], bool] | None) -> Result:
+    """The `hybrid` mode's verify stage: OCR + face tracks + LR-ASD for every candidate window,
+    classify each, and select per spec section 2 step 4 / `_select_occurrence`."""
+    t2 = time.perf_counter()
+    wav = cfg.cache_dir / f"{video.stem}.16k.wav"
+    if not wav.exists():                      # extract_audio always re-runs ffmpeg; skip if cached
+        extract_audio(video, wav)
+    detector = YuNetDetector(cfg.models_dir)
+    speaker = LrAsdDetector(cfg.models_dir)
+
+    occurrences: list[Occurrence] = []
+    for i, window in enumerate(windows):
+        _check_cancel(should_cancel)
+        reporter.emit(StageEvent("verify", "running", f"window {i}: {window.start_s:.1f}-{window.end_s:.1f}s",
+                                 payload={"window_index": i}))
+        occ = verify_window(src, window, target, ex, detector, speaker, wav, cfg, reporter, should_cancel)
+        occurrences.append(occ)
+        reporter.emit(StageEvent("verify", "ok", f"window {i}: {occ.klass}",
+                                 payload={"window_index": i, "faces": occ.faces, "asd_mean": occ.asd_mean}))
+    timings["verify"] = time.perf_counter() - t2
+
+    occ_dicts = [o.to_dict() for o in occurrences]
+    reporter.emit(StageEvent("occurrences", "ok", f"{len(occurrences)} occurrences classified",
+                             payload={"occurrences": occ_dicts}))
+
+    selected, alt_occs = _select_occurrence(occurrences, occurrence)
+    speaker_box = list(selected.speaker_box) if selected.speaker_box else None
+    speaker_image_path = ""
+    if speaker_box is not None:
+        speaker_image_path = _save_speaker_image(src, selected.frame_index, selected.speaker_box, cfg)
+    alternatives = [Candidate(o.frame_index, src.time_for_index(o.frame_index), o.window.matched_text,
+                              o.window.score) for o in alt_occs]
+
+    return _finish(src, cfg, reporter, timings, t0, selected.frame_index, "hybrid result",
+                   timestamp_s=src.time_for_index(selected.frame_index), text=selected.window.matched_text,
+                   confidence=confidence_for_occurrence(selected),
+                   source=_SOURCE_FOR_CLASS.get(selected.klass, "audio"), note=selected.note,
+                   window=selected.window, occurrence_class=selected.klass, speaker_box=speaker_box,
+                   speaker_image_path=speaker_image_path, occurrences=occ_dicts, alternatives=alternatives)
 
 
 def run(source_spec: str, target: str, *, cfg: Config = DEFAULT, reporter: ProgressReporter | None = None,
@@ -121,6 +191,8 @@ def run(source_spec: str, target: str, *, cfg: Config = DEFAULT, reporter: Progr
 
         # ---- locate by audio --------------------------------------------------
         window: Window | None = None
+        windows: list[Window] = []
+        hybrid_ready = False
         t1 = time.perf_counter()
         if mode in ("hybrid", "audio+ocr", "audio"):
             if locator is None:
@@ -129,19 +201,30 @@ def run(source_spec: str, target: str, *, cfg: Config = DEFAULT, reporter: Progr
                     locator = WhisperLocator(cfg, reporter)
                 except Exception as e:                      # import failure (missing/broken optional dependency)
                     reporter.emit(StageEvent("locate", "skipped", f"audio locator unavailable: {e}"))
+            if mode == "hybrid":
+                avail, reason = asd_available()
+                if avail:
+                    hybrid_ready = True
+                else:
+                    reporter.emit(StageEvent("verify", "skipped", reason))
             if locator is not None:
                 try:
                     reporter.emit(StageEvent("transcribe", "running", "transcribing audio"))
-                    window = locator.locate(video, target)
+                    if hybrid_ready:
+                        windows = locator.locate_all(video, target)
+                        window = windows[0] if windows else None
+                    else:
+                        window = locator.locate(video, target)
                     if window is None:
                         reporter.emit(StageEvent("locate", "fallback", "no audio match; will scan whole video"))
                     else:
                         reporter.emit(StageEvent("locate", "ok", f"window {window.start_s:.1f}-{window.end_s:.1f}s "
                                                  f"score {window.score:.2f}: '{window.matched_text}'", 1.0,
-                                                 {"window": window.__dict__}))
+                                                 {"window": window.__dict__, "windows": len(windows)}))
                 except Exception as e:
                     reporter.emit(StageEvent("locate", "fallback", f"audio stage failed: {e}"))
                     window = None
+                    windows = []
         else:
             reporter.emit(StageEvent("locate", "skipped", f"mode={mode}"))
         timings["locate"] = time.perf_counter() - t1
@@ -157,8 +240,14 @@ def run(source_spec: str, target: str, *, cfg: Config = DEFAULT, reporter: Progr
                                timestamp_s=src.time_for_index(idx), text=window.matched_text, confidence="MEDIUM",
                                source="audio", note="mode=audio; frame at first spoken word", window=window)
 
-            # ---- scan -----------------------------------------------------------
             ex = extractor or _default_extractor()
+
+            # ---- hybrid verify branch --------------------------------------------
+            if mode == "hybrid" and hybrid_ready and windows:
+                return _run_hybrid(src, video, windows, target, ex, cfg, reporter, timings, t0, occurrence,
+                                   should_cancel)
+
+            # ---- scan -----------------------------------------------------------
             t2 = time.perf_counter()
             if window is not None:
                 a = max(0.0, window.start_s - cfg.window_pad_s)
@@ -170,9 +259,9 @@ def run(source_spec: str, target: str, *, cfg: Config = DEFAULT, reporter: Progr
                 reporter.emit(StageEvent("scan", "running" if mode == "ocr" else "fallback",
                                          f"OCR whole video ({b:.0f}s) at {fps} fps"))
             cands, groups = _scan_for_groups(src, ex, target, a, b, fps, cfg, reporter, occurrence, should_cancel)
-            # Task 6 adds the verify branch here: hybrid mode currently falls straight through the
-            # audio+ocr path below (no OCR match -> widened retry -> audio fallback), since the
-            # visual (face-track + LR-ASD) stage doesn't exist yet.
+            # mode="hybrid" only reaches here when hybrid_ready is False (verify skipped) or
+            # locate_all found no windows (window is None) -- both cases behave exactly like
+            # audio+ocr from here on.
             if not groups and window is not None and mode in ("audio+ocr", "hybrid"):
                 # the window missed; retry a widened window around it (not the whole video) before giving up
                 r_a = max(0.0, window.start_s - cfg.retry_pad_s)
