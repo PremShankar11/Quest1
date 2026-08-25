@@ -57,6 +57,8 @@ fade-in label.
 
 ## Phase 3 — Build
 
+> Runs recorded before 2026-08-25 use "hybrid" for what is now called audio+ocr.
+
 ### Pipeline + CLI (Task 7)
 
 Built `dialogue_finder/pipeline.py` (`run`, `confidence_for`, `PipelineError`),

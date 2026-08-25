@@ -18,6 +18,15 @@ if TYPE_CHECKING:
     from .text.ocr import TextExtractor
 
 
+def asd_available() -> tuple[bool, str]:
+    """Whether the active-speaker (LR-ASD) extras are installed and ready to use.
+
+    Placeholder for Task 2: `hybrid` mode has no verify stage yet, so this is never called by
+    `run()` -- it exists only so the Task 6 xfail test in test_pipeline.py can monkeypatch it
+    ahead of time. Task 6 replaces this with `from .visual.lrasd import asd_available`."""
+    return (False, "visual stage not implemented yet")
+
+
 def _check_cancel(should_cancel: Callable[[], bool] | None) -> None:
     if should_cancel and should_cancel():
         raise PipelineError("cancelled")
@@ -113,7 +122,7 @@ def run(source_spec: str, target: str, *, cfg: Config = DEFAULT, reporter: Progr
         # ---- locate by audio --------------------------------------------------
         window: Window | None = None
         t1 = time.perf_counter()
-        if mode in ("hybrid", "audio"):
+        if mode in ("hybrid", "audio+ocr", "audio"):
             if locator is None:
                 try:
                     from .audio.locator import WhisperLocator
@@ -161,7 +170,10 @@ def run(source_spec: str, target: str, *, cfg: Config = DEFAULT, reporter: Progr
                 reporter.emit(StageEvent("scan", "running" if mode == "ocr" else "fallback",
                                          f"OCR whole video ({b:.0f}s) at {fps} fps"))
             cands, groups = _scan_for_groups(src, ex, target, a, b, fps, cfg, reporter, occurrence, should_cancel)
-            if not groups and window is not None and mode == "hybrid":
+            # Task 6 adds the verify branch here: hybrid mode currently falls straight through the
+            # audio+ocr path below (no OCR match -> widened retry -> audio fallback), since the
+            # visual (face-track + LR-ASD) stage doesn't exist yet.
+            if not groups and window is not None and mode in ("audio+ocr", "hybrid"):
                 # the window missed; retry a widened window around it (not the whole video) before giving up
                 r_a = max(0.0, window.start_s - cfg.retry_pad_s)
                 r_b = min(src.duration_s, window.end_s + cfg.retry_pad_s)

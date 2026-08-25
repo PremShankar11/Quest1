@@ -20,6 +20,18 @@ class Config:
     whisper_task: str = "translate"
     cache_dir: Path = field(default_factory=lambda: REPO_ROOT / "cache")
     output_dir: Path = field(default_factory=lambda: REPO_ROOT / "output")
+    # Visual verification mode (Plan 4) knobs -- consumed by the visual stage, not this task.
+    asd_threshold: float = 0.5
+    asd_min_active: float = 0.3
+    asd_onset_frames: int = 3
+    min_track_s: float = 0.5
+    min_face_px: int = 40
+    max_occurrences: int = 5
+    onset_lookback_s: float = 1.0
+
+    @property
+    def models_dir(self) -> Path:
+        return self.cache_dir / "models"
 
 
 DEFAULT = Config()

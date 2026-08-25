@@ -125,7 +125,7 @@ def test_hybrid_retries_widened_window_not_whole_video(synthetic_clip, tmp_path)
     cfg = DEFAULT.__class__(output_dir=tmp_path / "out2", cache_dir=tmp_path / "cache2")
     reporter = CollectingReporter()
     window = Window(5.0, 5.5, 0.95, truth["text"])
-    res = run(str(path), truth["text"], cfg=cfg, mode="hybrid", local=True,
+    res = run(str(path), truth["text"], cfg=cfg, mode="audio+ocr", local=True,
              extractor=FakeNoMatch(), locator=FakeLocator(), reporter=reporter)
     assert res.source == "audio"
     assert res.frame_index == 120
@@ -173,7 +173,7 @@ def test_refine_fallback_events_carry_frame_index(synthetic_clip):
         def read(self, image): return ""
     class FakeLocator:
         def locate(self, video, target): return Window(5.0, 6.0, 0.9, "hi")
-    run(str(path), truth["text"], mode="hybrid", local=True, reporter=Collect(), extractor=NoMatch(), locator=FakeLocator())
+    run(str(path), truth["text"], mode="audio+ocr", local=True, reporter=Collect(), extractor=NoMatch(), locator=FakeLocator())
     fb = [e for e in events if e.stage == "refine" and e.status == "fallback"][0]
     assert fb.payload["frame_index"] == 120
 
@@ -182,3 +182,20 @@ def test_default_paths_are_repo_anchored():
     from dialogue_finder.config import DEFAULT, REPO_ROOT
     assert DEFAULT.cache_dir == REPO_ROOT / "cache" and DEFAULT.cache_dir.is_absolute()
     assert (REPO_ROOT / "backend").is_dir()
+
+
+@pytest.mark.xfail(strict=True, reason="Task 6")
+def test_hybrid_without_extras_matches_audio_ocr(synthetic_clip, tmp_path, monkeypatch):
+    """Without the ASD extras, mode="hybrid" must degrade to exactly the audio+ocr answer and
+    emit a `verify: skipped` event. `_run_hybrid` (Task 6) is what makes this true; for now
+    mode="hybrid" just falls through the audio+ocr path with no verify stage at all."""
+    import dialogue_finder.pipeline as pipeline_mod
+    monkeypatch.setattr(pipeline_mod, "asd_available", lambda: (False, "requirements-asd.txt not installed"))
+    path, truth = synthetic_clip
+    cfg = DEFAULT.__class__(output_dir=tmp_path / "out_hybrid", cache_dir=tmp_path / "cache_hybrid")
+    reporter = CollectingReporter()
+    res = run(str(path), truth["text"], cfg=cfg, mode="hybrid", local=True,
+             extractor=FakeNoMatch(), locator=FakeLocator(), reporter=reporter)
+    assert res.source == "audio"
+    assert res.frame_index == 120
+    assert any(e.stage == "verify" and e.status == "skipped" for e in reporter.events)

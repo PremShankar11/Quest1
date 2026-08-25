@@ -9,13 +9,14 @@ from typing import Protocol
 
 from ..config import Config
 from ..video.downloader import ensure_ffmpeg
-from ..text.matcher import best_word_window
+from ..text.matcher import all_word_windows
 from ..models import StageEvent, Window, Word
 from ..progress import ProgressReporter
 
 
 class Locator(Protocol):
     def locate(self, video: Path, target: str) -> Window | None: ...
+    def locate_all(self, video: Path, target: str) -> list[Window]: ...
 
 
 def words_cache_path(video: Path, cfg: Config) -> Path:
@@ -137,9 +138,10 @@ class WhisperLocator:
         os.replace(tmp, cache)
         return words
 
-    def locate(self, video: Path, target: str) -> Window | None:
+    def locate_all(self, video: Path, target: str) -> list[Window]:
         words = self._words(video)
-        win = best_word_window(words, target)
-        if win is None or win.score < self.cfg.audio_match_threshold:
-            return None
-        return win
+        return all_word_windows(words, target, self.cfg.audio_match_threshold, self.cfg.max_occurrences)
+
+    def locate(self, video: Path, target: str) -> Window | None:
+        wins = self.locate_all(video, target)
+        return wins[0] if wins else None

@@ -63,3 +63,18 @@ def test_format_timestamp():
     assert format_timestamp(0) == "00:00:00.000"
     assert format_timestamp(3725.5) == "01:02:05.500"
     assert format_timestamp(59.9996) == "00:01:00.000"
+
+
+def test_all_word_windows_returns_non_overlapping_sorted_capped():
+    from dialogue_finder.text.matcher import all_word_windows
+    words = [Word(w, i * 0.5, i * 0.5 + 0.4) for i, w in enumerate(
+        ("my mind rebels at stagnation " * 3 + "the quick brown fox").split())]
+    wins = all_word_windows(words, "My mind rebels at stagnation", threshold=0.6, cap=2)
+    assert len(wins) == 2 and wins[0].score >= wins[1].score
+    assert wins[0].end_s <= wins[1].start_s or wins[1].end_s <= wins[0].start_s
+
+
+def test_all_word_windows_empty_below_threshold():
+    from dialogue_finder.text.matcher import all_word_windows
+    words = [Word(w, i, i + 0.5) for i, w in enumerate("the quick brown fox".split())]
+    assert all_word_windows(words, "my mind rebels at stagnation", threshold=0.6, cap=5) == []

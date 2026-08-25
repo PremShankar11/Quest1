@@ -35,6 +35,29 @@ def score_similar(a: str, b: str) -> float:
     return fuzz.token_sort_ratio(a, b) / 100.0
 
 
+def all_word_windows(words: list[Word], target: str, threshold: float, cap: int) -> list[Window]:
+    """Every non-overlapping span scoring >= threshold, best first (greedy: take the best, drop
+    overlaps, repeat)."""
+    n = max(1, len(normalize(target).split()))
+    spans: list[Window] = []
+    for size in range(max(1, n - 1), n + 3):
+        for i in range(0, max(1, len(words) - size + 1)):
+            span = words[i:i + size]
+            if not span:
+                continue
+            s = score_similar(target, " ".join(w.text for w in span))
+            if s >= threshold:
+                spans.append(Window(span[0].start, span[-1].end, s, " ".join(w.text for w in span)))
+    spans.sort(key=lambda w: (-w.score, w.start_s))
+    chosen: list[Window] = []
+    for w in spans:
+        if all(w.end_s <= c.start_s or w.start_s >= c.end_s for c in chosen):
+            chosen.append(w)
+        if len(chosen) >= cap:
+            break
+    return chosen
+
+
 def best_word_window(words: list[Word], target: str) -> Window | None:
     """Slide windows of ~len(target words) over the transcript; return the best-scoring span."""
     if not words:

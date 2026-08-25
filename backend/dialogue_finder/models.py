@@ -36,6 +36,56 @@ class Candidate:
 
 
 @dataclass
+class FaceTrack:
+    """A face tracked across consecutive frames of a candidate window (visual stage, Plan 4).
+
+    `frames[j]` is the absolute video frame index and `boxes[j]`/`scores[j]` align to it --
+    see the plan's frame-alignment convention. `scores` defaults empty because a track exists
+    (from the face detector) before LR-ASD has scored it."""
+    track_id: int
+    frames: list[int]
+    boxes: list[tuple[int, int, int, int]]     # (x, y, w, h) per frame, aligned to `frames`
+    scores: list[float] = field(default_factory=list)
+
+    @property
+    def start_index(self) -> int:
+        return self.frames[0]
+
+    @property
+    def end_index(self) -> int:
+        return self.frames[-1]
+
+    def median_height(self) -> float:
+        if not self.boxes:
+            return 0.0
+        heights = sorted(b[3] for b in self.boxes)
+        mid = len(heights) // 2
+        if len(heights) % 2:
+            return float(heights[mid])
+        return (heights[mid - 1] + heights[mid]) / 2.0
+
+
+@dataclass
+class Occurrence:
+    """One candidate window classified by the visual stage (Plan 4): OCR + face tracks +
+    active-speaker detection. `klass` is one of valid-text | valid-speaker | uncertain | invalid."""
+    window: Window
+    klass: str
+    frame_index: int
+    ocr_score: float
+    faces: int
+    asd_mean: float
+    speaker_box: tuple[int, int, int, int] | None
+    note: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        """asdict() already recurses into `window` (a nested dataclass), turning it into a
+        plain dict; tuples (e.g. `speaker_box`) survive as tuples, which json.dumps serialises
+        as arrays same as a list."""
+        return asdict(self)
+
+
+@dataclass
 class VideoInfo:
     fps: float
     frame_count: int
@@ -86,6 +136,12 @@ class Result:
     candidates: list[Candidate] = field(default_factory=list)
     alternatives: list[Candidate] = field(default_factory=list)
     timings_s: dict[str, float] = field(default_factory=dict)
+    # Visual verification mode (Plan 4) fields -- populated by the hybrid mode's verify stage
+    # (Task 6); empty/default for the audio, ocr and audio+ocr modes.
+    occurrence_class: str = ""       # valid-text | valid-speaker | uncertain | invalid
+    speaker_box: list[int] | None = None      # [x, y, w, h] on the result frame
+    speaker_image_path: str = ""
+    occurrences: list[dict] = field(default_factory=list)
 
     @property
     def timestamp(self) -> str:
@@ -101,6 +157,11 @@ class Result:
         ]
         if self.prev_image_path:
             lines.append(f"Previous  : {self.prev_image_path}  ({self.appearance or 'frame before'})")
+        if self.occurrence_class:
+            lines.append(f"Occurrence: {self.occurrence_class}")
+        if self.speaker_box:
+            x, y, w, h = self.speaker_box
+            lines.append(f"Speaker  : {x},{y},{w},{h}")
         return "\n".join(lines)
 
     def to_dict(self) -> dict[str, Any]:

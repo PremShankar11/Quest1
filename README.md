@@ -56,8 +56,16 @@ Output (real run, `--mode hybrid`, this video has no burned-in subtitles so it r
 
 Frame numbers are 0-based. Timestamp is `HH:MM:SS.sss`.
 
-Flags: `--local <file>` (use a local file instead of `--url`), `--mode hybrid|audio|ocr` (default `hybrid`),
-`--occurrence first|last|all` (default `first`), `--verbose`/`-v`, `--json`, `--out <dir>` (default `<repo>/output`).
+Flags: `--local <file>` (use a local file instead of `--url`), `--mode hybrid|audio+ocr|audio|ocr` (default
+`hybrid`), `--occurrence first|last|all` (default `first`), `--verbose`/`-v`, `--json`, `--out <dir>`
+(default `<repo>/output`).
+
+| `--mode` | Meaning |
+|---|---|
+| `hybrid` | Default. Currently behaves like `audio+ocr` (the visual verify stage lands in a later task). |
+| `audio+ocr` | Whisper locates the line, OCR confirms the on-screen frame (was called `hybrid` before 2026-08-25). |
+| `audio` | Whisper transcript match only; frame at the first spoken word. |
+| `ocr` | On-screen text scan of the whole video, no audio locating. |
 
 `--occurrence last|all` ranks matches inside the region that was scanned — the audio window in hybrid
 mode; use `--mode ocr` for a whole-video ranking.

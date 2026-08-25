@@ -16,7 +16,7 @@ def build_parser() -> argparse.ArgumentParser:
     src.add_argument("--url", help="video URL (any yt-dlp supported site)")
     src.add_argument("--local", help="path to a local video file")
     p.add_argument("--text", required=True, help='target dialogue, e.g. "My mind rebels at stagnation"')
-    p.add_argument("--mode", choices=["hybrid", "audio", "ocr"], default="hybrid")
+    p.add_argument("--mode", choices=["hybrid", "audio+ocr", "audio", "ocr"], default="hybrid")
     p.add_argument("--occurrence", choices=["first", "last", "all"], default="first")
     p.add_argument("--out", default=None, help="output directory (default: <repo>/output)")
     p.add_argument("--json", action="store_true", help="also print result.json content to stdout")

@@ -177,6 +177,13 @@ def test_validation_errors_are_json():
         assert c.post("/jobs", json={"url": "x", "text": "y", "mode": "weird"}).status_code == 422
 
 
+def test_mode_audio_ocr_and_hybrid_accepted(monkeypatch):
+    monkeypatch.setattr(jobs_mod, "run", fake_run_factory(EVENTS, RESULT))
+    with TestClient(app) as c:
+        assert c.post("/jobs", json={"url": "x.mp4", "text": "hi", "mode": "audio+ocr"}).status_code == 200
+        assert c.post("/jobs", json={"url": "x.mp4", "text": "hi", "mode": "hybrid"}).status_code == 200
+
+
 def test_reporter_debounces_only_payloadless_running_events():
     job = jobs_mod.Job(jobs_mod.JobRequest(url="x", text="y"))
     rep = jobs_mod.JobReporter(job)

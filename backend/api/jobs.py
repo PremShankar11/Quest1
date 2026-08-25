@@ -18,7 +18,7 @@ DEBOUNCE_S = 0.2
 class JobRequest(BaseModel):
     url: str = Field(min_length=1)
     text: str = Field(min_length=1)
-    mode: Literal["hybrid", "audio", "ocr"] = "hybrid"
+    mode: Literal["hybrid", "audio+ocr", "audio", "ocr"] = "hybrid"
     occurrence: Literal["first", "last", "all"] = "first"
 
 

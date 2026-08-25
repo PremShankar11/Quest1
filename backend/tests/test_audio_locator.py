@@ -22,6 +22,20 @@ def test_locate_uses_cached_words_and_threshold(tmp_path):
     assert loc.locate(video, "completely unrelated sentence here") is None
 
 
+def test_locate_all_returns_every_window_locate_returns_best(tmp_path):
+    video = tmp_path / "v2.mp4"; video.write_bytes(b"x")
+    cfg = DEFAULT.__class__(cache_dir=tmp_path)
+    line = "come along watson my mind rebels at stagnation give me problems"
+    words = [{"text": w, "start": i * 0.5, "end": i * 0.5 + 0.4} for i, w in enumerate(
+        (line + " " + line).split())]
+    words_cache_path(video, cfg).write_text(json.dumps(words), encoding="utf-8")
+    loc = WhisperLocator(cfg, NullReporter())
+    wins = loc.locate_all(video, "My mind rebels at stagnation")
+    assert len(wins) == 2
+    best = loc.locate(video, "My mind rebels at stagnation")
+    assert best == wins[0]
+
+
 @pytest.mark.slow
 def test_transcribe_real_audio_smoke(tmp_path):
     """Generates 3 s of silence and checks transcription returns a list (may be empty) without error."""
