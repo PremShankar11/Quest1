@@ -88,6 +88,36 @@ def _scan_for_groups(src: FrameSource, ex: TextExtractor, target: str, a: float,
     return cands, groups
 
 
+def retry_ocr_scan_if_missed(src: FrameSource, ex: TextExtractor, target: str, cands: list[Candidate],
+                             groups: list[list[Candidate]], fps: float, window: Window | None, cfg: Config,
+                             reporter: ProgressReporter, occurrence: str,
+                             should_cancel: Callable[[], bool] | None
+                             ) -> tuple[list[Candidate], list[list[Candidate]], float]:
+    """If `groups` is empty and `window` is given, retry the OCR scan ONCE over `window` padded
+    by `cfg.retry_pad_s` (not the whole video) at `cfg.fullscan_fps`, emitting a `scan fallback`
+    event with the widened range. Returns the (possibly updated) `(cands, groups, fps)`, or the
+    inputs unchanged if no retry was needed.
+
+    Shared by `run()`'s audio+ocr/hybrid-fallback scan and `visual.verifier._ocr_occurrence`'s
+    per-window OCR check (hybrid mode) -- both widen identically on a miss (regression fix: the
+    verify stage used to only ever scan the padded window, so a subtitle just outside it, still
+    reachable by the same widened retry `audio+ocr` uses, was reported `invalid`/`uncertain`
+    instead of `valid-text`). `visual.verifier` imports this lazily (inside the function that
+    calls it) to avoid a circular import -- this module already imports `visual.verifier` at
+    its own top level.
+    """
+    if groups or window is None:
+        return cands, groups, fps
+    r_a, r_b = window.padded(src.duration_s, cfg.retry_pad_s)
+    reporter.emit(StageEvent("scan", "fallback",
+                             f"no match in window; retrying {r_a:.0f}-{r_b:.0f}s at {cfg.fullscan_fps} fps"))
+    cands, groups = _scan_for_groups(src, ex, target, r_a, r_b, cfg.fullscan_fps, cfg, reporter, occurrence,
+                                     should_cancel)
+    if groups:
+        fps = cfg.fullscan_fps
+    return cands, groups, fps
+
+
 def _finish(src: FrameSource, cfg: Config, reporter: ProgressReporter, timings: dict[str, float], t0: float,
            frame_index: int, done_msg: str, **result_kwargs) -> Result:
     """Save the result frame + its predecessor, stamp total elapsed time, emit `done`, and build the Result."""
@@ -264,17 +294,10 @@ def run(source_spec: str, target: str, *, cfg: Config = DEFAULT, reporter: Progr
             cands, groups = _scan_for_groups(src, ex, target, a, b, fps, cfg, reporter, occurrence, should_cancel)
             # mode="hybrid" only reaches here when hybrid_ready is False (verify skipped) or
             # locate_all found no windows (window is None) -- both cases behave exactly like
-            # audio+ocr from here on.
-            if not groups and window is not None and mode in ("audio+ocr", "hybrid"):
-                # the window missed; retry a widened window around it (not the whole video) before giving up
-                r_a, r_b = window.padded(src.duration_s, cfg.retry_pad_s)
-                reporter.emit(StageEvent("scan", "fallback",
-                                         f"no match in window; retrying {r_a:.0f}-{r_b:.0f}s at "
-                                         f"{cfg.fullscan_fps} fps"))
-                cands, groups = _scan_for_groups(src, ex, target, r_a, r_b, cfg.fullscan_fps, cfg,
-                                                 reporter, occurrence, should_cancel)
-                if groups:
-                    fps = cfg.fullscan_fps
+            # audio+ocr from here on. window is None for mode="ocr", so the retry below never
+            # fires for it (matches the old explicit `mode in ("audio+ocr", "hybrid")` guard).
+            cands, groups, fps = retry_ocr_scan_if_missed(src, ex, target, cands, groups, fps, window, cfg,
+                                                           reporter, occurrence, should_cancel)
             timings["scan"] = time.perf_counter() - t2
             step = max(1, int(round(src.fps / fps)))
 

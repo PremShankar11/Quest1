@@ -31,7 +31,7 @@ from ..config import Config
 from ..models import CancelledError, FaceTrack, Occurrence, PipelineError, StageEvent, Window
 from ..progress import ProgressReporter
 from ..text.refiner import refine_first_frame
-from ..text.scanner import coarse_scan
+from ..text.scanner import coarse_scan, group_hits, pick_group
 from .audio_features import mfcc_for_video, speech_mask
 from .faces import FaceDetector, build_tracks, crop_face
 from .lrasd import SpeakerDetector
@@ -151,16 +151,31 @@ def confidence_for_occurrence(occ: Occurrence) -> str:
     return "MEDIUM"   # uncertain
 
 
-def _ocr_occurrence(src, window: Window, target: str, extractor, a: float, b: float, fps: float, step: int,
+def _ocr_occurrence(src, window: Window, target: str, extractor, a: float, b: float, fps: float,
                     cfg: Config, reporter: ProgressReporter,
                     should_cancel: Callable[[], bool] | None) -> Occurrence | None:
-    """`verify_window`'s OCR stage: existing `coarse_scan` + `refine_first_frame`, same as
-    `audio+ocr`. Returns the `valid-text` Occurrence for the first hit, or None if OCR missed."""
+    """`verify_window`'s OCR stage: `coarse_scan` the padded window and, on a miss, retry ONCE
+    over the window widened by `cfg.retry_pad_s` at `cfg.fullscan_fps` -- the identical widened
+    retry `run()`'s audio+ocr branch uses (`pipeline.retry_ocr_scan_if_missed`; a subtitle just
+    outside the ASD window, e.g. `window_pad_s` away, is otherwise missed and the occurrence
+    misclassified `invalid`/`uncertain` -- regression fix). Then `refine_first_frame`, same as
+    `audio+ocr`. Returns the `valid-text` Occurrence for the first hit (post-retry), or None if
+    OCR missed even after the retry.
+
+    `pipeline.retry_ocr_scan_if_missed` is imported here (not at module level): `pipeline.py`
+    already imports this module at its own top level, so a top-level import here would be
+    circular; by the time this function runs, `pipeline` is always already fully loaded.
+    """
+    from ..pipeline import retry_ocr_scan_if_missed
+
     cands = coarse_scan(src, extractor, target, a, b, fps, cfg, reporter, should_cancel=should_cancel)
-    hits = [c for c in cands if c.score >= cfg.ocr_match_threshold]
-    if not hits:
+    groups = pick_group(group_hits(cands, cfg.ocr_match_threshold, cfg.hit_gap_s), "first")
+    cands, groups, fps = retry_ocr_scan_if_missed(src, extractor, target, cands, groups, fps, window, cfg,
+                                                  reporter, "first", should_cancel)
+    if not groups:
         return None
-    first_hit = hits[0]
+    first_hit = groups[0][0]
+    step = max(1, int(round(src.fps / fps)))   # fps may now be cfg.fullscan_fps if a retry hit
     prev_index = max(0, first_hit.frame_index - step)
     ocr_cand, exact = refine_first_frame(src, extractor, target, first_hit.frame_index, prev_index, cfg, step=step)
     note = "" if exact else "text already visible at scan start; first frame may be earlier"
@@ -231,10 +246,9 @@ def verify_window(src, window: Window, target: str, extractor, detector: FaceDet
     """
     a, b = window.padded(src.duration_s, cfg.window_pad_s)
     fps = cfg.window_fps
-    step = max(1, int(round(src.fps / fps)))
     fallback_frame = src.index_for_time(window.start_s)
 
-    ocr_occ = _ocr_occurrence(src, window, target, extractor, a, b, fps, step, cfg, reporter, should_cancel)
+    ocr_occ = _ocr_occurrence(src, window, target, extractor, a, b, fps, cfg, reporter, should_cancel)
     if ocr_occ is not None:
         return ocr_occ
 

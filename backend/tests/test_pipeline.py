@@ -335,3 +335,75 @@ def test_audio_ocr_locate_payload_has_no_windows_key(synthetic_clip, tmp_path):
        extractor=FakeNoMatch(), locator=FakeLocator(), reporter=reporter)
     locate_ok = [e for e in reporter.events if e.stage == "locate" and e.status == "ok"]
     assert locate_ok and set(locate_ok[0].payload.keys()) == {"window"}
+
+
+# ---- hybrid OCR retry: parity with audio+ocr's widened-window retry (fix round 2) -----------
+
+class FakeEarlyFrameExtractor:
+    """TextExtractor that 'matches' only on bright frames -- pairs with `_make_flip_clip`, whose
+    frames are bright for index < `flip_at` and dark afterwards, so this fakes 'text visible
+    only in early frames' without needing real OCR content."""
+    def __init__(self, text: str) -> None:
+        self._text = text
+
+    def read(self, image) -> str:
+        return self._text if image.mean() > 128 else ""
+
+
+def _make_flip_clip(path, duration_s: float = 15.0, fps: int = 24, flip_at: int = 100,
+                    size: tuple[int, int] = (640, 360)) -> None:
+    """A plain video, bright for frame index < `flip_at` and dark afterwards -- content a fake
+    extractor (`FakeEarlyFrameExtractor`) can key off without real OCR."""
+    w, h = size
+    writer = cv2.VideoWriter(str(path), cv2.VideoWriter_fourcc(*"mp4v"), fps, (w, h))
+    if not writer.isOpened():
+        raise RuntimeError("cv2.VideoWriter could not open output")
+    total = int(round(duration_s * fps))
+    for i in range(total):
+        color = 220 if i < flip_at else 20
+        writer.write(np.full((h, w, 3), color, dtype=np.uint8))
+    writer.release()
+
+
+def test_hybrid_ocr_uses_widened_retry_like_audio_ocr(tmp_path, monkeypatch):
+    """Fix round 2 (regression from validation): a subtitle just outside the padded ASD window
+    (window ± `window_pad_s` = 3s) but inside the widened retry range (window ± `retry_pad_s` =
+    15s) must still be found and classified `valid-text` -- `audio+ocr` already finds such a hit
+    via its widened-window retry; the hybrid verify stage's `_ocr_occurrence` used to only ever
+    scan the padded window, so this occurrence used to fall through to the visual stage and come
+    back `invalid`/`uncertain` instead (Squid Game clip: subtitle at 9.9s, ASR window
+    24.6-29.6s). Here the fake locator's window (8-9s) padded window is [5, 12]s -- entirely
+    dark (frame_index >= 100) -- so the first OCR scan must miss; the widened retry range is
+    [0, 15]s (clamped) -- bright from frame 0, so the retry must hit at frame 0."""
+    _patch_hybrid_extras(monkeypatch, FakeBoxDetector(), FakeCountingSpeaker([0.0]))
+    clip = tmp_path / "flip.mp4"
+    _make_flip_clip(clip)
+    target = "My mind rebels at stagnation"
+    window = Window(8.0, 9.0, 0.63, target)
+    cfg = DEFAULT.__class__(output_dir=tmp_path / "out_h5", cache_dir=tmp_path / "cache_h5")
+    reporter = CollectingReporter()
+    res = run(str(clip), target, cfg=cfg, mode="hybrid", local=True,
+             extractor=FakeEarlyFrameExtractor(target), locator=FakeLocatorAll([window]), reporter=reporter)
+
+    assert res.occurrence_class == "valid-text"
+    assert res.source == "ocr"
+    assert res.frame_index == 0
+    assert res.text == target
+    assert any(e.stage == "scan" and e.status == "fallback" and "retrying" in e.message
+              for e in reporter.events)
+
+
+def test_hybrid_ocr_retry_not_run_when_first_scan_hits(synthetic_clip, tmp_path, monkeypatch):
+    """Fix round 2: the widened retry must NOT run when the padded-window OCR scan already hit
+    (no wasted rescan, no spurious `scan fallback` event)."""
+    _patch_hybrid_extras(monkeypatch, FakeBoxDetector(), FakeCountingSpeaker([0.0]))
+    path, truth = synthetic_clip
+    window = Window(5.0, 5.5, 0.95, truth["text"])
+    cfg = DEFAULT.__class__(output_dir=tmp_path / "out_h6", cache_dir=tmp_path / "cache_h6")
+    reporter = CollectingReporter()
+    res = run(str(path), truth["text"], cfg=cfg, mode="hybrid", local=True,
+             extractor=FakeConstantOcrExtractor("MY MIND REBELS AT STAGNATION"),
+             locator=FakeLocatorAll([window]), reporter=reporter)
+
+    assert res.occurrence_class == "valid-text"
+    assert not any(e.stage == "scan" and e.status == "fallback" for e in reporter.events)
