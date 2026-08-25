@@ -13,7 +13,8 @@ full story.
 
 (Create the venv first if you haven't — see the CLI section below; both scripts check for it and tell
 you if it's missing.) The script opens `http://127.0.0.1:8000` in your browser and starts the server in
-the foreground; `Ctrl+C` stops it.
+the foreground; `Ctrl+C` stops it. If Windows blocks `start.ps1` with an execution-policy error, run:
+`powershell -ExecutionPolicy Bypass -File start.ps1`.
 
 Paste a video URL or a local file path and the line of dialogue, press "Find frame", and watch the
 pipeline run live: the stage list ticks through download → transcribe → locate → scan → refine → done,

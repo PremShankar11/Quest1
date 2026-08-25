@@ -358,8 +358,7 @@ runs is dominated by `whisper base` CPU transcription (60-120 s), not download.
   model; non-Latin burned-in subtitles would need a different or multi-language model bundle.
 - **Scene detection** — could narrow the whole-video fallback scan to shot boundaries instead of a fixed
   fps sample; not needed once the audio-first + widened-retry strategy made the whole-video path rare.
-- **Web UI (Plan 2).** Plan 1 is CLI-only by design; the live-progress web interface (FastAPI + static
-  HTML/JS, decided in the stack review) is the next plan, not part of this one.
+- **Web UI (Plan 2)** — built in Plan 2, see Phase 6.
 
 ## Phase 6 — Web UI
 
@@ -382,12 +381,16 @@ reconnect logic of its own.
 |---|---|---|---|
 | download | ok | `path, fps, frame_count, duration_s` | video fetched or opened locally |
 | transcribe | running | — | Whisper transcribing the audio track |
-| locate | ok / fallback / skipped | `window {start_s, end_s}, score` (on ok) | audio window found / no match, will scan / mode doesn't use audio |
+| locate | ok / fallback / skipped | `window {start_s, end_s}, score` (on ok) | audio window found / no audio match found (will scan whole video) or the audio stage itself failed / mode doesn't use audio |
 | scan | running / fallback | progress, best score so far | OCR sampling the window, the widened retry, or the whole video |
-| refine | ok / fallback | `frame_index, score` (on ok) | binary search landed the exact frame / falling back to the audio timestamp or best-effort frame |
-| done | ok | the full `Result` | pipeline finished, result ready |
+| refine | ok / fallback | `frame_index` (on ok; score is in the message) | binary search landed the exact frame / falling back to the audio timestamp or best-effort frame |
+| done | ok | — (no payload) | pipeline finished; message only, no result data |
 | error | error | — | unexpected failure, translated to a one-line message |
 | end | done / error / cancelled | — | terminal event; closes the stream (client and server both stop on it) |
+
+The `done` event carries no payload — it's a message-only marker that the pipeline finished. The result
+itself reaches the page separately: on `end`, the frontend (`frontend/app.js:finish()`) calls
+`GET /jobs/{id}` to fetch `{status, result, error}`, rather than the result being pushed over SSE.
 
 Debounce (200 ms, `JobReporter.emit` in `api/jobs.py`) drops repeat `running`/progress-only ticks from
 the same stage so a 45-sample OCR scan doesn't push 45 near-identical SSE events — every `ok`/`fallback`/
