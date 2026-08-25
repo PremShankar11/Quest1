@@ -471,3 +471,155 @@ Notes:
   network allowed the download, so the brief's cached-file fallback wasn't needed.
 - Stopping the server: only the uvicorn process started for this validation pass was killed
   (`start.ps1`'s child process); no other process on the machine was touched.
+
+## Phase 7 — Visual verification (hybrid mode)
+
+### Why a third kind of evidence
+
+Audio says *where* a line is spoken; OCR says *where* it's written. Neither answers a question
+that matters for "does this frame show the dialogue actually being delivered": is the person
+saying it visible on screen at all, or is this a voice-over, a phone call, a narrator, a
+character standing just out of frame? Two lines score identically on audio and both lack
+on-screen text, yet one shows the speaker's face moving in sync with the words and the other
+shows an empty room or someone else's back. `hybrid` mode adds a third signal — active-speaker
+detection on tracked faces inside the same window Whisper already located — so the pipeline can
+rank "this person is visibly saying it" above "it was said, off screen" without a human looking
+at the frame. Nothing built in Plan 1/2 changes: the old `hybrid` behaviour is renamed
+`audio+ocr` and stays byte-identical (see Validation table below); `hybrid` becomes the new,
+default, full mode.
+
+### Classification table (spec §3)
+
+| Evidence in the window | Class | Frame | Confidence |
+|---|---|---|---|
+| OCR hit ≥ `ocr_match_threshold` (0.8) | **valid-text** | OCR first frame (existing refiner) | HIGH (≥0.9) / MEDIUM |
+| No OCR; a usable face track's LR-ASD score ≥ `asd_threshold` (0.5) on ≥ `asd_min_active` (30%) of the window's speech frames | **valid-speaker** | visual onset (§4) | HIGH if mean score ≥0.7, else MEDIUM |
+| No OCR; ≥1 usable track, none qualifies | **invalid** (off-screen) | first spoken word | LOW |
+| No OCR; no usable track (none detected, too short/small, or ASD unavailable) | **uncertain** | first spoken word | MEDIUM |
+
+"No usable face" is never treated as "not speaking" — a person can be on screen facing away, so
+that case is `uncertain`, not `invalid`. `invalid` requires seeing at least one qualifying-length,
+qualifying-size face and confirming *none* of them is talking.
+
+### Why LR-ASD
+
+Research done in Plan 4's Task 1 spike (`docs/superpowers/spikes/2026-08-25-lrasd-spike.md`) before
+any implementation code — a decision gate, not a rewrite-after-the-fact:
+
+| Option | Verdict | Why |
+|---|---|---|
+| **LR-ASD** (Liao et al., IJCV 2025, MIT licence) | **chosen** | 0.84 M params, CPU-only forward pass viable (measured ≈0.85-0.9 s per 10 s window), weights ship inside the repo (no separate download gate), source: [github.com/Junhua-Liao/LR-ASD](https://github.com/Junhua-Liao/LR-ASD) |
+| Light-ASD | rejected | superseded by LR-ASD, same author — LR-ASD is the maintained successor |
+| TalkNet-ASD | rejected | heavier, licence unclear |
+| LoCoNet / SPELL | rejected | 34 M params, needs GPU — far outside the CPU-only contract this project has kept since Plan 1 |
+| SyncNet | rejected | lip-sync *offset* as a proxy, not a direct active-speaker probability; no ready CPU inference path measured |
+| Lip-motion heuristic (YuNet + 106-pt landmarks + MAR/VAD correlation) | rejected as primary, kept as documented fallback (spec §10) | explainable, no torch dependency — but not a model, and weak on profile faces (mouth-aspect-ratio degrades off-axis); the spec names this as the fallback engine behind the same `SpeakerDetector` protocol if the spike had failed |
+| Cloud APIs (Google Video Intelligence, AWS Rekognition, Twelve Labs, Azure Video Indexer) | rejected | none fuse audio with face tracks to answer "is *this* face speaking *this* line" — same objection Plan 1's stack review raised for OCR/ASR cloud options (docs/DECISIONS.md, Phase 1) |
+
+The spike measured LR-ASD's `finetuning_TalkSet` weights separating speaking frames (mean prob
+0.950) from quiet frames (mean prob 0.140) on this project's own test footage — a TV episode, not
+LR-ASD's AVA/Columbia benchmark distribution — with zero false-positive frames on the quiet span,
+confirming the model generalizes to out-of-domain video before any pipeline code was written
+around it.
+
+### Why windows only
+
+LR-ASD never runs over a whole video — only inside the candidate windows Whisper's
+`locate_all()` already found (capped at `cfg.max_occurrences`, 5). A whole-episode YuNet+LR-ASD
+pass would cost roughly `(episode seconds / window seconds) ×` the per-window cost below — for
+the 3262 s test episode, tens of minutes, the same order of magnitude Phase 3 already ruled out
+for whole-video OCR. Running only where audio has already narrowed the search keeps the visual
+stage inside the same "locate cheaply, verify precisely" shape as OCR's binary search.
+
+### Alignment: 4 audio frames per video frame, and the 23.976 fps fix
+
+LR-ASD's `Fusion` layer concatenates the audio and visual embeddings after `audio_encoder`
+downsamples 100 Hz MFCC to 25 Hz with two stride-2 time-pools — an architectural constraint, not
+a convention: `T_audio_raw` must equal exactly `4 × T_video` or the concat crashes (spike note,
+`preprocessing`). The model was trained assuming 25 fps video; this project's real footage is
+23.976 fps. Rather than resample video with an extra `ffmpeg -r 25` pass per window (spike note's
+explicit non-fix), `visual/audio_features.py`'s `mfcc_for_video(wav, start_s, end_s, fps)` takes
+the *actual* source fps and sets `winstep = 1 / (4 × fps)` so the audio hop rate tracks the video
+frame rate exactly — audio frames are always exactly 4× video frames by construction, no trimming
+drift (ledger ruling, Task 1: "to avoid the 23.976-vs-25 fps drift the spike found, Task 4 mfcc
+takes fps and uses winstep = 1/(4·fps)"). The residual cost is timestamp accuracy, not frame
+count: onset frames are documented as accurate to roughly **±0.25 s**, not frame-exact, since the
+model itself was trained on 25 fps timing and 23.976 fps frames land slightly differently in real
+wall-clock time than the model's training distribution assumed.
+
+### Measured costs
+
+**Spike (synthetic window, Task 1):** ≈5.9-6.1 s per 10 s window on CPU — YuNet detect+crop ≈5.2 s
+(87% of the cost, the dominant stage), MFCC extraction ≈0.05 s, LR-ASD forward pass ≈0.85-0.9 s.
+Model load (~0.04-0.1 s) is one-time per process, not counted per window. ~10x under the spike's
+60 s/10 s-window gate.
+
+**Task 6 (real `IouTracker`/`verify_window`, one window, episode):** verify stage ≈26.4 s for a
+single ~2.7 s window padded to ~8.7 s (325.1-327.8 s ± `window_pad_s`).
+
+**Task 8 (this task, real end-to-end runs):**
+
+| Run | Window duration (padded) | `verify` stage time | Notes |
+|---|---|---|---|
+| Episode, `--mode hybrid` (default) | ~2.66 s → ~8.7 s padded | **28.39 s** | one candidate window; `locate_all` found only one span ≥0.6 for this line |
+| Squid Game clip, `--mode hybrid` | ~5.0 s → ~11.0 s padded | included in 62.8 s wall time | one window; OCR misses in-window (see Limits), falls through to face+ASD scoring |
+| Voice-over clip (iguana/snakes, no faces), `--mode hybrid` | ~4.18 s → ~10.2 s padded | **47.18 s** | no faces detected at all — YuNet ran the full padded window, LR-ASD never invoked (0 tracks to score) |
+
+Per-window cost scales with window duration as the spike predicted, and stays one to two orders
+of magnitude below a whole-video pass; the earlier "worth a coarse check against real
+episode-length runs" concern (spike note, `decision`, concern 1) is resolved — these are the real
+episode-length numbers.
+
+### Validation (real runs, this task)
+
+| # | Command (essentials) | Expected | Actual | Time | Correct? |
+|---|---|---|---|---|---|
+| 1 | episode, `--mode hybrid` (default) | `valid-speaker`, `audio+asd`, onset near frame 7794 | `valid-speaker` / `audio+asd` / **frame 7801** (+7 frames ≈ +0.29 s after the audio word-start 7794) / `Speaker: 218,-15,304,410` | wall 31.9 s (verify 28.39 s) | yes — onset trails the word start by a fraction of a second, the expected direction (mouth movement lags the transcribed word boundary) |
+| 2 | same episode line, `--mode audio+ocr` | byte-identical to the pre-rename `hybrid` answer | `audio` / frame **7794** / 00:05:25.073 / MEDIUM — exact match | wall 70.6 s | yes — proves the renamed old mode is untouched |
+| 3 | Squid Game clip, `--mode hybrid` | `valid-text`, frame 297 (spec §8 assumption) | **`invalid`** / `audio` / frame 737 / LOW — "faces visible but none speaking" | wall 62.8 s | **diverges from the brief's expectation** — see Limits below; confirmed **not** a regression by rerunning `--mode audio+ocr` on the same clip: still `ocr` / frame **297** / HIGH, byte-identical to Phase 4's matrix |
+| 4 | voice-over clip (BBC Earth, *Iguana vs Snakes*, [youtube.com/watch?v=el4CQj-TCbA](https://www.youtube.com/watch?v=el4CQj-TCbA), line "On flat ground, a baby iguana can outrun a racer snake.") | `invalid` or `uncertain` | **`uncertain`** / `audio` / frame 735 / MEDIUM — "no usable face in the window" (0 faces detected — all-animal footage, no human on screen at all) | wall 51.5 s (verify 47.18 s) | yes — one of the two documented acceptable outcomes |
+| 5 | episode line, extras monkeypatched unavailable (`asd_available` forced `(False, ...)`), no uninstall | `[verify:skipped]`, answer identical to `audio+ocr` | `[verify:skipped] requirements-asd.txt not installed`, then `audio` / frame **7794** / MEDIUM — exact match to run 2 | wall 66.1 s | yes |
+
+Commands used (from `backend/`, `..\.venv\Scripts\python`):
+
+```
+# 1
+python -m dialogue_finder --local ../cache/5f39d4605665a831.mp4 --text "My mind rebels at stagnation" --verbose
+# 2
+python -m dialogue_finder --local ../cache/5f39d4605665a831.mp4 --text "My mind rebels at stagnation" --mode audio+ocr --verbose
+# 3
+python -m dialogue_finder --url "https://www.youtube.com/watch?v=3_XZ354E9uE" --text "In my town, we had a game called the Squid Game." --mode hybrid --verbose
+# 4
+python -m dialogue_finder --url "https://www.youtube.com/watch?v=el4CQj-TCbA" --text "On flat ground, a baby iguana can outrun a racer snake." --mode hybrid --verbose
+# 5
+python -c "import dialogue_finder.pipeline as p, sys; p.asd_available = lambda *a, **k: (False, 'requirements-asd.txt not installed'); from dialogue_finder.cli import main; sys.exit(main(['--local','../cache/5f39d4605665a831.mp4','--text','My mind rebels at stagnation','--verbose']))"
+```
+
+### Limits
+
+- **Onset timing: ≈±0.25 s.** Same root cause as the alignment fix above — native 23.976 fps
+  video fed to a 25-fps-trained model — documented, not "fixed" by an extra resample pass.
+- **Per-window OCR does not retry on a widened window.** `audio+ocr`'s pipeline-level fallback
+  widens a missed OCR scan by `±retry_pad_s` (15 s); `verify_window` (hybrid's per-window path)
+  only scans `window ± window_pad_s` (3 s) — it never widens. **Found by this task's run 3**: the
+  Squid Game clip's audio locate lands on a garbled Korean-to-English translation window
+  (24.6-29.6 s, score 0.63) that doesn't contain the caption at all; the caption actually sits at
+  9.9 s (frame 297), 15 s outside the padded window, only reachable by the widened retry that
+  `audio+ocr` has and `hybrid` does not. Result: on this clip, the new default mode (`hybrid`)
+  gives a *worse* answer (`invalid`/LOW) than the old mode (`audio+ocr`, `valid-text`/HIGH) —
+  user-visible, and not what spec §8's expected outcome assumed. This is a real, documented gap,
+  not a bug fixed by this task (docs-only scope); the fix (teaching `verify_window` the same
+  widened-retry rescue) is future work, not built here.
+- **Profile faces.** YuNet detects side-on faces less reliably than frontal ones, and LR-ASD's
+  training data skews frontal/near-frontal (Columbia/AVA benchmarks); a face that's genuinely
+  speaking but heavily profiled can under-score and land as `invalid` rather than `valid-speaker`.
+  Not observed as a failure in the validation runs above, but not structurally ruled out.
+- **Cuts inside a window.** If the speaker's track begins mid-line (a cut lands the camera on
+  them after the line has already started), `find_onset` can fail to find a qualifying run inside
+  the search range; the occurrence still resolves to `valid-speaker` but falls back to the first
+  spoken word frame with the note `"speaker visible; onset not observed (cut)"` rather than a
+  visual onset.
+- **CPU torch only.** No `.cuda()` path exists anywhere in the vendored LR-ASD model or its
+  callers (unlike Whisper's GPU/CPU fallback in `audio/locator.py`) — a deliberate scope cut
+  (spec §9), since `requirements-asd.txt`'s torch wheel is CPU-only on this stack and per-window
+  cost is already ~10x under budget without a GPU.

@@ -200,6 +200,103 @@ yt-dlp, static-ffmpeg, opencv-python, rapidocr + onnxruntime, faster-whisper, ra
   guarded (`os.name == "nt"`, and it's a no-op when no `nvidia/*/bin` directory is on `sys.path`) so
   nothing changes for a machine that skips the extras file.
 
+## Plan 4 — Visual verification (2026-08-25)
+
+- AI's brainstorm proposal was to rename nothing and just add a fourth mode. → I decided instead:
+  the *new* full mode (audio + OCR + active-speaker) takes over the name **`hybrid`** and becomes
+  the default, and the mode that mode name used to mean is renamed **`audio+ocr`**, behaviour
+  untouched. → I said it directly: "there are already three modes and none of which needs to be
+  changed... i want this to be the fourth mode called as hybrid and the prev hybrid mode can now
+  be called audio+ocr and we need not change any of its features" — `hybrid` should mean the *real*
+  hybrid (all three evidence types), not stay pinned to its old, narrower meaning; every existing
+  test and doc that used `mode="hybrid"` for the old audio+OCR behaviour was swept to
+  `mode="audio+ocr"` (Task 2), and history in APPROACH.md's earlier phases keeps the old label with
+  a note explaining it, since those runs predate the rename and rewriting history would desync them
+  from their own commit record.
+- AI's default-mode question was left open in the design gate. → I chose **`hybrid` stays the
+  default**, not `audio+ocr`. → A plain run should get the full evidence stack by default; without
+  the ASD extras installed it degrades gracefully to the old `audio+ocr` answer plus a
+  `[verify:skipped]` line (proven in this task's validation run 5), so nobody without `torch` loses
+  functionality by taking the new default.
+- AI's initial model idea (in my own brainstorm prompt) was "some model like L or ASD, I don't know
+  whether this is good — you do your own research." → I let the AI's own spike (Task 1) settle it
+  on **LR-ASD** over the alternatives it considered (Light-ASD, TalkNet, LoCoNet/SPELL, SyncNet, a
+  lip-motion heuristic, cloud APIs). → LR-ASD is the only option that is simultaneously CPU-viable
+  (0.84 M params, measured ≈0.85-0.9 s forward pass per 10 s window), ships its own weights inside
+  the repo (no separate download gate to fail), and is a genuine model rather than a hand-tuned
+  heuristic — the lip-motion heuristic stayed on as the documented fallback (spec §10) behind the
+  same `SpeakerDetector` protocol, in case the spike had failed its GO/NO-GO gate; it didn't, so the
+  heuristic was never built.
+- AI's spec draft could have treated "no face detected in the window" the same as "a face was seen
+  but wasn't talking." → I ruled explicitly: **"no usable face" is never treated as "not
+  speaking."** → I said in the brainstorm: "if faces there and speaking, that is a high match, if
+  not, then that is a low match" — but a person can be on screen facing away from the camera, or
+  the face can simply be too small/short-lived to track; conflating "we saw nobody" with "we saw
+  someone and they weren't talking" would silently downgrade genuinely valid off-camera-face lines
+  to the same `invalid` bucket as a real "narrator, not the person on screen" case. The
+  classification table keeps them as two separate classes: `uncertain` (no usable track) vs
+  `invalid` (a usable track exists, none qualifies).
+- AI's `verify_window` runs OCR + face/ASD scoring only inside the *same padded window* Whisper's
+  `locate_all()` returned (± `window_pad_s`, 3 s), never widened. → I accepted this as a documented
+  limit rather than asking for a fix in this task. → This task's own validation (run 3, the Squid
+  Game clip) is what surfaced it: the audio locate window landed on a garbled Korean-to-English
+  translation span that doesn't contain the on-screen caption at all, and only `audio+ocr`'s
+  separate ±15 s widened-retry fallback (a Plan 1 mechanism `verify_window` never inherited) rescues
+  it. The result is user-visible — the new default mode gives a worse answer than the old mode on
+  that one clip — and is written up as a Limit in APPROACH.md Phase 7 rather than silently patched,
+  since this task's scope is docs and validation, not code.
+- AI's LR-ASD probability rule, read naively off the upstream demo script, would have thresholded
+  the *raw logit* (`head(outsAV)[:, 1] >= 0`) the way `Columbia_test.py`'s visualization does. → I
+  had the spike correct this to the calibrated **softmax probability**
+  (`softmax(head(outsAV), dim=-1)[:, 1] >= asd_threshold`). → The raw-logit rule and the softmax
+  rule aren't equivalent (`softmax(x)[1] >= 0.5 ⟺ x[1] >= x[0]`, not `x[1] >= 0`); using the
+  uncalibrated logit against a probability-shaped config constant (`asd_threshold: 0.5`) would have
+  made the threshold meaningless. A later review note corrected the spike's own framing further:
+  upstream's published Columbia ASD F1 scores were themselves computed with the raw-logit rule, so
+  it's upstream's actual benchmark methodology, not merely a "demo-only visualization shortcut" —
+  this codebase still deliberately uses the softmax probability, because it's what makes
+  `asd_threshold` a real, comparable number.
+- AI's default `Config` had no knobs for the visual stage. → I had `asd_threshold` (0.5),
+  `asd_min_active` (0.3), `asd_onset_frames` (3), `min_track_s` (0.5 s), `min_face_px` (40 px),
+  `max_occurrences` (5), and `onset_lookback_s` (1.0 s) added as named, documented `Config` fields
+  rather than inline constants. → Every other pipeline stage's tunables already live in `Config`
+  (`audio_match_threshold`, `ocr_match_threshold`, `window_pad_s`, ...); the visual stage
+  shouldn't be the one stage whose thresholds are buried in a module and invisible to anyone
+  reading `config.py`.
+- A background security review flagged that both model downloads (`faces.py`'s YuNet ONNX and
+  `lrasd.py`'s LR-ASD weights) fetched over HTTP with no integrity check. → I ruled: **pin
+  SHA-256 hashes for both**, verify after every download and again on every load, delete-and-raise
+  on mismatch (not silently retried — a hash mismatch is a security failure, not a transient
+  network blip). → An upstream mirror compromise, MITM, or plain corrupted download would otherwise
+  load straight into `cv2.FaceDetectorYN` or `torch.load` with no signal to the user; the shared
+  `visual/model_files.py:fetch_verified()` helper (added by Task 5's simplifier pass) now carries
+  this pattern for both files so a third model added later gets it for free.
+- AI's `4:1 audio:video frame ratio` implementation for MFCC extraction, before the spike's
+  drift finding, would have used a fixed 100 Hz hop rate (`winstep=0.010`) regardless of the
+  video's actual fps. → I had Task 4 change it to **fps-aware**: `winstep = 1 / (4 × fps)`, so
+  audio frames are always exactly 4× video frames by construction for the video's *real* frame
+  rate (23.976 fps), not the 25 fps LR-ASD was trained on. → The spike measured this mismatch as
+  ~4.1% timestamp drift (~0.2-0.25 s per 10 s window) if fed through unmodified; resampling the
+  video with a per-window `ffmpeg -r 25` pass would fix the drift but cost an extra encode per
+  window for no measured benefit to scoring — the ruling accepted the residual ±0.25 s onset
+  accuracy instead of paying that cost, and documented it rather than hiding it.
+- AI's first pass on the OCR-hit result in a `hybrid` occurrence reused `Result.text` from the
+  ASR-matched transcript line, even for `valid-text` occurrences. → A task review caught this and
+  I had it changed: `Occurrence` gained its own `text` field, set from the OCR-read string (not the
+  spoken-word transcript) when the occurrence classifies as `valid-text`. → A `valid-text` result
+  should show the reader what was actually **on screen**, not what Whisper heard — those two
+  strings can differ (translation artefacts, OCR reading the literal on-screen wording), and
+  showing the ASR text on an on-screen-text result silently misrepresents which piece of evidence
+  won.
+- AI's `--occurrence` flag semantics for `hybrid` were unspecified beyond "ranks by class, then ASR
+  score." → I ruled `--occurrence` **keeps its pre-Plan-4 meaning within the selected class**:
+  class order (`valid > uncertain > invalid`) picks which bucket wins, then `first`/`last`/`all`
+  work exactly as they did before — `first`/`all` by highest ASR score then earliest window,
+  `last` by temporally latest window in that class. → Reusing the existing flag's meaning inside
+  the new class dimension means the flag's contract doesn't silently change for users of the older
+  modes, and a `--occurrence last` on a `hybrid` run stays predictable rather than needing a new
+  flag or a new meaning to learn.
+
 ## Phase 1 — Build notes
 
 - **static-ffmpeg download can fail on some networks.** `static_ffmpeg.add_paths()` fetches ffmpeg/ffprobe from

@@ -27,6 +27,12 @@ it, timecode, text, and confidence.
 
 ![Web UI](docs/ui.png)
 
+`hybrid` mode adds an **Occurrences** block (one row per candidate window: timecode, ASR score, OCR
+✓/✗, faces, speaking ✓/✗/?, class badge) and, when a speaker is confirmed, swaps the result frame for
+the boxed speaker image:
+
+![Web UI, hybrid mode result with speaker box](docs/ui-hybrid.png)
+
 The API in five lines:
 
 - `POST /jobs` `{url, text, mode, occurrence}` → `{id}` — starts a job (`url` is a URL or a local path)
@@ -45,7 +51,8 @@ one job runs at a time (CPU-bound OCR/Whisper aren't re-entrant-safe), first run
     cd backend
     ..\.venv\Scripts\python -m dialogue_finder --url "https://ok.ru/video/248244667877" --text "My mind rebels at stagnation" --out ..\output
 
-Output (real run, `--mode hybrid`, this video has no burned-in subtitles so it resolves via audio):
+Output (recorded before the 2026-08-25 mode rename with `--mode hybrid`, meaning what is now
+`--mode audio+ocr` — this video has no burned-in subtitles so it resolves via audio):
 
     Timestamp : 00:05:25.073
     Frame     : 7794
@@ -54,21 +61,47 @@ Output (real run, `--mode hybrid`, this video has no burned-in subtitles so it r
     Image     : ..\output\frame_7794.png
     Previous  : ..\output\frame_7793.png  (frame before)
 
+Real run, `--mode hybrid` (default, current full mode — Plan 4), same video and line, active-speaker
+detection confirms Holmes is on screen saying it:
+
+    Timestamp : 00:05:25.365
+    Frame     : 7801
+    Text      : "My mind rebels its stagnation."
+    Confidence: HIGH  (source: audio+asd; on-screen speaker verified (LR-ASD mean 0.89))
+    Image     : ..\output\frame_7801.png
+    Previous  : ..\output\frame_7800.png  (frame before)
+    Occurrence: valid-speaker
+    Speaker   : 218,-15,304,410
+
+`Occurrence` (the window's classification: `valid-text | valid-speaker | uncertain | invalid`) and
+`Speaker` (the face box, `x,y,w,h`, on the result frame) print only in `hybrid` mode when a speaker
+was found; `frame_<n>_speaker.png` (the frame with that box drawn) is written alongside the usual pair.
+
 Frame numbers are 0-based. Timestamp is `HH:MM:SS.sss`.
 
 Flags: `--local <file>` (use a local file instead of `--url`), `--mode hybrid|audio+ocr|audio|ocr` (default
 `hybrid`), `--occurrence first|last|all` (default `first`), `--verbose`/`-v`, `--json`, `--out <dir>`
 (default `<repo>/output`).
 
-| `--mode` | Meaning |
-|---|---|
-| `hybrid` | Default. Currently behaves like `audio+ocr` (the visual verify stage lands in a later task). |
-| `audio+ocr` | Whisper locates the line, OCR confirms the on-screen frame (was called `hybrid` before 2026-08-25). |
-| `audio` | Whisper transcript match only; frame at the first spoken word. |
-| `ocr` | On-screen text scan of the whole video, no audio locating. |
+| `--mode` | Meaning | Needs |
+|---|---|---|
+| `hybrid` | **Default.** Whisper locates → OCR + face tracks + active-speaker detection (LR-ASD) → classify each candidate `valid-text \| valid-speaker \| uncertain \| invalid` → pick and refine the frame. | `requirements-asd.txt` (torch, CPU) — see below. Without it, degrades automatically to the `audio+ocr` answer plus `[verify:skipped] ...`. |
+| `audio+ocr` | Whisper locates the line, OCR confirms the on-screen frame (was called `hybrid` before 2026-08-25 — same behaviour, new name). | `requirements.txt` only |
+| `audio` | Whisper transcript match only; frame at the first spoken word. | `requirements.txt` only |
+| `ocr` | On-screen text scan of the whole video, no audio locating. | `requirements.txt` only |
 
-`--occurrence last|all` ranks matches inside the region that was scanned — the audio window in hybrid
-mode; use `--mode ocr` for a whole-video ranking.
+`--occurrence last|all` ranks matches inside the region that was scanned — the audio window (or, in
+`hybrid`, the selected candidate window's class) — use `--mode ocr` for a whole-video ranking.
+
+**Active-speaker detection (optional, `--mode hybrid`):** `.venv\Scripts\pip install -r requirements-asd.txt`
+(torch CPU wheel + `python_speech_features`, ~a few hundred MB). LR-ASD's pretrained weights and the
+YuNet face-detector model download automatically on first `hybrid` run into `cache/models/` (SHA-256
+verified on every download and load — a hash mismatch deletes the file and raises rather than loading a
+corrupted/tampered model). If the automatic download fails (the same GitHub-connection-reset issue noted
+below for ffmpeg can affect this too), fetch manually with `curl`:
+
+    curl -L -o cache/models/finetuning_TalkSet.model https://raw.githubusercontent.com/Junhua-Liao/LR-ASD/1b6dcd2d8fc2895683de6508ec6294ec47d388ca/weight/finetuning_TalkSet.model
+    curl -L -o cache/models/face_detection_yunet_2023mar.onnx https://media.githubusercontent.com/media/opencv/opencv_zoo/main/models/face_detection_yunet/face_detection_yunet_2023mar.onnx
 
 First run downloads faster-whisper's `base` model (approximately 150 MB), RapidOCR's models
 (approximately 10 MB), and the video

@@ -109,3 +109,30 @@ What was reverted and why it looked like a defect to me:
 Where it stands now: `locator.py` and `requirements.txt` are back to the committed version, the three `nvidia-*` packages are uninstalled from the venv, the ledger records the revert as a ruling. Nothing you committed was touched — the changes were never committed, so `git` has no trace of them.
 
 If you want GPU transcription, the right shape is small and reviewable: an optional extras group (`requirements-gpu.txt` with the two nvidia packages), the DLL-path helper guarded so it only runs when those packages are present, one test that the CPU path still works without them, and a README line "GPU: `pip install -r requirements-gpu.txt`" — plus a DECISIONS.md entry with the measured speed-up (transcription was 2 m 44 s on CPU; you'd want the GPU number next to it). Say the word and that becomes a short task on the plan-2 branch. i added this functionality to make the app run faster, i think we had that as the primary path and the cpu as a fallback so even if someone does not have a gpu, it runs on their pc. add this functionality back to our project and then proceed wiht the other works
+
+[27]
+what about the plan 3?
+
+[28]
+/superpowers:brainstorming Right now, we have an hybrid mode in our project we are using which uses audio plus OCR but I am thinking of introducing a new feature which uses audio plus OCR but along with it it also detects whether a person is actually visible and he is speaking on our screen using some models like L or ASD I thought of this model I don't know whether this is good or not so you do your own research and come up with some good models which checks whether a person is actually visible and he is speaking on our screen instead of directly taking the audio alone and have this approach as a real hybrid approach and the current hybrid approach we have you can call that audio plus OCR and just don't remove any of the work that we did up until now and just add what I say as a fourth feature first I want to bringstorm regarding this aspect and come up with a plan to do that i am thinking of doing this, so help me with this feature also.
+
+[29] (answer to "what should the visual stage change about the answer?")
+i want this new approach to be a real hybrid one, so take the same audio window which we normally had and then check for visible faces on that, if faces there and speaking, that is a high match, if not, then that is a low match and if some other high matches availbale in the video, they should be preferred over this. thisis what i really want.
+
+[30] (answer to "which engine?")
+I already have an ASR/Whisper-based stage that searches the video for the target dialogue and creates a candidate time window around each detected occurrence.Within each candidate window, I want to add a visual verification stage to determine whether the detected dialogue is being spoken by a person who is visibly present on screen.Use OpenCV YuNet for face detection/tracking and LR-ASD for active-speaker detection, scoring each tracked face over the candidate window.I will also run my existing OCR stage on the same window to determine whether the target dialogue is visually present as text.Combine the ASR evidence + OCR evidence + LR-ASD active-speaker evidence to classify each candidate occurrence as valid, invalid/off-screen, or uncertain.Do not run LR-ASD over the entire video. Run it only on the candidate windows identified by the ASR stage.Treat “no usable face” as uncertain/unavailable, not automatically as “not speaking,” because a person may be on screen but facing away.After selecting the valid occurrence, refine the timing around its speech/visual boundary and return the exact first frame, timestamp, frame number, extracted text, and frame image.
+
+[31] (answer to "approve the design?")
+there are already three modes and none of which needs to be changed, i want this to be the fourth mode called as hybrid and the prev hubrid mode can now be called audio+ocr and we need not change any of its features.
+
+[32] (answer to "default mode?")
+hybrid (new full mode)
+
+[33]
+session limit is going to hit.so stop everything for now and then proceed later when i ask you to continue
+
+[34]
+continue plan 4
+
+[35]
+continue plan 4
