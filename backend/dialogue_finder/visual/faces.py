@@ -113,7 +113,7 @@ def _iou(a: tuple[int, int, int, int], b: tuple[int, int, int, int]) -> float:
     return inter / union if union > 0 else 0.0
 
 
-class _OpenTrack:
+class _Track:
     __slots__ = ("track_id", "frames", "boxes", "last_frame")
 
     def __init__(self, track_id: int, frame_index: int, box: tuple[int, int, int, int]) -> None:
@@ -131,38 +131,31 @@ class IouTracker:
     def __init__(self, iou_threshold: float = 0.5, max_gap: int = 3) -> None:
         self.iou_threshold = iou_threshold
         self.max_gap = max_gap
-        self._open: list[_OpenTrack] = []
-        self._closed: list[_OpenTrack] = []
+        self._tracks: list[_Track] = []
         self._next_id = 0
 
     def update(self, frame_index: int, boxes: list[tuple[int, int, int, int]]) -> None:
-        still_open = []
-        for t in self._open:
-            if frame_index - t.last_frame > self.max_gap:
-                self._closed.append(t)
-            else:
-                still_open.append(t)
-        self._open = still_open
+        # A track that has gone unmatched for too long can never gain a later `last_frame`,
+        # so it can never re-qualify here -- no separate closed list is needed.
+        open_tracks = [t for t in self._tracks if frame_index - t.last_frame <= self.max_gap]
 
         candidates = []
-        for ti, t in enumerate(self._open):
+        for ti, t in enumerate(open_tracks):
             for bi, b in enumerate(boxes):
                 score = _iou(t.boxes[-1], b)
                 if score >= self.iou_threshold:
                     candidates.append((score, ti, bi))
         candidates.sort(key=lambda c: -c[0])
 
-        matched_tracks: set[int] = set()
         matched_boxes: set[int] = set()
         assignment: dict[int, int] = {}
         for score, ti, bi in candidates:
-            if ti in matched_tracks or bi in matched_boxes:
+            if ti in assignment or bi in matched_boxes:
                 continue
-            matched_tracks.add(ti)
             matched_boxes.add(bi)
             assignment[ti] = bi
 
-        for ti, t in enumerate(self._open):
+        for ti, t in enumerate(open_tracks):
             if ti in assignment:
                 box = boxes[assignment[ti]]
                 t.frames.append(frame_index)
@@ -171,12 +164,12 @@ class IouTracker:
 
         for bi, box in enumerate(boxes):
             if bi not in matched_boxes:
-                self._open.append(_OpenTrack(self._next_id, frame_index, box))
+                self._tracks.append(_Track(self._next_id, frame_index, box))
                 self._next_id += 1
 
     def tracks(self) -> list[FaceTrack]:
-        all_tracks = sorted(self._closed + self._open, key=lambda t: t.frames[0])
-        return [FaceTrack(track_id=t.track_id, frames=list(t.frames), boxes=list(t.boxes)) for t in all_tracks]
+        ordered = sorted(self._tracks, key=lambda t: t.frames[0])
+        return [FaceTrack(track_id=t.track_id, frames=list(t.frames), boxes=list(t.boxes)) for t in ordered]
 
 
 def build_tracks(
