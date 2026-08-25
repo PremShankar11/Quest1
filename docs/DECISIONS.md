@@ -181,6 +181,20 @@ yt-dlp, static-ffmpeg, opencv-python, rapidocr + onnxruntime, faster-whisper, ra
   the audio route, teal for OCR — and the only user is an interviewer watching one run once; a toggle
   would be effort spent on a preference nobody here has expressed (same YAGNI discipline as Plan 1's
   WhisperX call).
+- AI kept CPU as the contract for Whisper transcription (`_load_model` fell back to CPU on any
+  CUDA-flavoured error and stopped there). → I added GPU as the primary path with CPU fallback, not a
+  replacement for it. → this machine has an RTX 3050 and `nvidia-smi` works, but faster-whisper's CUDA
+  backend (ctranslate2) needs cuBLAS 12 + cuDNN 9 DLLs on the DLL search path that a plain
+  `pip install faster-whisper` never provides — without them `WhisperModel(..., device="cuda")`
+  constructs fine but `.transcribe()` throws a cublas load error, which is exactly the failure the
+  existing fallback already catches. Installing `nvidia-cublas-cu12` / `nvidia-cudnn-cu12` and pointing
+  the process at their DLLs (via a new `_ensure_cuda_path()` in `locator.py`, called only when
+  `device == "cuda"`) turns that caught failure into a working GPU run instead (measured: CPU 2 m 44 s
+  vs GPU 48.9 s on the cached test episode's `.16k.wav`, both `base`/`translate`). Packaging: the CUDA
+  packages are ~1 GB and Windows/NVIDIA-specific, so they live in a separate `requirements-gpu.txt`
+  rather than `requirements.txt` — a CPU-only machine never downloads them, and `_ensure_cuda_path` is
+  guarded (`os.name == "nt"`, and it's a no-op when no `nvidia/*/bin` directory is on `sys.path`) so
+  nothing changes for a machine that skips the extras file.
 
 ## Phase 1 — Build notes
 

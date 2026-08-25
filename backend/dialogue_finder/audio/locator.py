@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import sys
 from pathlib import Path
 from typing import Protocol
 
@@ -31,7 +32,47 @@ def extract_audio(video: Path, wav: Path) -> Path:
     return wav
 
 
+def _ensure_cuda_path() -> None:
+    """Make the cuBLAS/cuDNN DLLs shipped inside the nvidia-*-cu12 pip packages
+    discoverable by ctranslate2's CUDA backend.
+
+    Those packages install their DLLs under `<site-packages>/nvidia/<component>/bin`
+    rather than anywhere Windows normally searches, so without this step
+    `WhisperModel(..., device="cuda")` constructs fine but `.transcribe()` fails with
+    a cublas/cudnn load error (see `_looks_like_cuda_error` below, which is what
+    catches that failure and falls back to CPU). Windows-only and a no-op when the
+    nvidia packages aren't installed (e.g. requirements-gpu.txt was never applied,
+    or this is a non-GPU machine) — CPU-only setups never call this at all.
+    """
+    if os.name != "nt":
+        return
+    path_entries = os.environ.get("PATH", "").split(os.pathsep)
+    seen = set(path_entries)
+    added: list[str] = []
+    for entry in sys.path:
+        nvidia_dir = Path(entry) / "nvidia"
+        if not nvidia_dir.is_dir():
+            continue
+        for component in sorted(nvidia_dir.iterdir()):
+            bin_dir = component / "bin"
+            if not bin_dir.is_dir():
+                continue
+            bin_str = str(bin_dir)
+            if bin_str in seen:
+                continue
+            seen.add(bin_str)
+            added.append(bin_str)
+            try:
+                os.add_dll_directory(bin_str)
+            except (AttributeError, OSError):
+                pass
+    if added:
+        os.environ["PATH"] = os.pathsep.join(added + path_entries)
+
+
 def _load_model(name: str, device: str = "cuda"):
+    if device == "cuda":
+        _ensure_cuda_path()
     from faster_whisper import WhisperModel
     if device == "cuda":
         try:

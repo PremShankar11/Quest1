@@ -16,6 +16,9 @@ you if it's missing.) The script opens `http://127.0.0.1:8000` in your browser a
 the foreground; `Ctrl+C` stops it. If Windows blocks `start.ps1` with an execution-policy error, run:
 `powershell -ExecutionPolicy Bypass -File start.ps1`.
 
+**GPU (optional):** `pip install -r requirements-gpu.txt` — NVIDIA GPU with a recent driver; falls back
+to CPU automatically.
+
 Paste a video URL or a local file path and the line of dialogue, press "Find frame", and watch the
 pipeline run live: the stage list ticks through download → transcribe → locate → scan → refine → done,
 a timeline bar for the whole video fills in — an amber window where the audio locates the line, teal

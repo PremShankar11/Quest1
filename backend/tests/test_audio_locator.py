@@ -1,4 +1,7 @@
 import json
+import os
+import sys
+import types
 
 import pytest
 
@@ -85,3 +88,49 @@ def test_non_cuda_error_propagates(monkeypatch, tmp_path):
     monkeypatch.setattr(locator_mod, "_load_model", fake_load_model)
     with pytest.raises(RuntimeError):
         locator_mod.transcribe_words(tmp_path / "x.wav", "base", "translate", NullReporter())
+
+
+def test_ensure_cuda_path_noop_when_no_nvidia_dir(monkeypatch, tmp_path):
+    import dialogue_finder.audio.locator as locator_mod
+
+    monkeypatch.setattr(sys, "path", [str(tmp_path)])
+    before = os.environ.get("PATH", "")
+    monkeypatch.setenv("PATH", before)
+    locator_mod._ensure_cuda_path()
+    assert os.environ.get("PATH", "") == before
+
+
+def test_ensure_cuda_path_prepends_nvidia_bin_dirs(monkeypatch, tmp_path):
+    import dialogue_finder.audio.locator as locator_mod
+
+    bin_dir = tmp_path / "nvidia" / "cublas" / "bin"
+    bin_dir.mkdir(parents=True)
+    monkeypatch.setattr(sys, "path", [str(tmp_path)])
+    monkeypatch.setenv("PATH", r"C:\existing")
+
+    locator_mod._ensure_cuda_path()
+
+    if os.name == "nt":
+        entries = os.environ["PATH"].split(os.pathsep)
+        assert entries[0] == str(bin_dir)
+        assert r"C:\existing" in entries
+    else:
+        assert os.environ["PATH"] == r"C:\existing"
+
+
+def test_load_model_cpu_does_not_call_ensure_cuda_path(monkeypatch):
+    import dialogue_finder.audio.locator as locator_mod
+
+    calls: list[None] = []
+    monkeypatch.setattr(locator_mod, "_ensure_cuda_path", lambda: calls.append(None))
+
+    class _FakeWhisperModel:
+        def __init__(self, name, device, compute_type):
+            self.name, self.device, self.compute_type = name, device, compute_type
+
+    fake_module = types.SimpleNamespace(WhisperModel=_FakeWhisperModel)
+    monkeypatch.setitem(sys.modules, "faster_whisper", fake_module)
+
+    model, device = locator_mod._load_model("base", "cpu")
+    assert device == "cpu"
+    assert calls == []

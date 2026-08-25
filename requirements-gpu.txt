@@ -1,0 +1,7 @@
+# Optional. Install after requirements.txt to run Whisper on an NVIDIA GPU.
+# CPU works without this.
+nvidia-cublas-cu12>=12.0
+nvidia-cudnn-cu12>=9.0
+# Pulled transitively by nvidia-cublas-cu12 (not by cudnn); pinned explicitly so the
+# extras file is a complete, reviewable list of what gets installed.
+nvidia-cuda-nvrtc-cu12>=12.0

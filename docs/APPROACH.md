@@ -171,7 +171,12 @@ burned-in subtitles — see Phase 1):
   23:20:24, from file mtimes) for the full 54-minute video — well under the ~10-20
   min estimate, likely due to VAD-filtered silence skipping. Detected language:
   **en**. 4 098 words transcribed and cached to
-  `cache/5f39d4605665a831.words.json`.
+  `cache/5f39d4605665a831.words.json`. **With `requirements-gpu.txt` installed and
+  `_ensure_cuda_path()` wired in (Task 6, 2026-08-25)**, the same `.16k.wav` on
+  this RTX 3050 transcribes in **48.9 s** on `cuda` (4 066 words) vs **141.2 s** on
+  a forced-`cpu` rerun (4 098 words, minor VAD/word-split differences from
+  float16-vs-int8) — GPU is now the primary path, CPU remains the automatic
+  fallback.
 - Locate: `[locate:ok] window 325.1-327.8s score 0.95: 'My mind rebels its
   stagnation.'`
 - Scan (post-fix, rerun 2, transcript cache hit): OCR 322.1-330.8s at 5.0 fps → no
