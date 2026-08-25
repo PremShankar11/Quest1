@@ -14,6 +14,7 @@ const showError = (msg) => { error.textContent = msg; error.hidden = false; setS
 function reset() {
   error.hidden = true; $("result").hidden = true; $("cands-block").hidden = true; $("transcript-block").hidden = true;
   $("filmstrip").innerHTML = ""; $("ticks").innerHTML = ""; $("window").hidden = true; $("marker").hidden = true;
+  delete $("timeline").dataset.route;
   $("tc-end").textContent = "--:--:--"; duration = 0; fps = 0; seenCandidates.clear();
   document.querySelectorAll("#stages li").forEach((li) => { li.dataset.status = ""; li.querySelector(".msg").textContent = ""; });
   hint.textContent = "Starting…";
@@ -71,7 +72,7 @@ async function finish(st) {
   setState("done", "done"); hint.textContent = "Done.";
   placeMarker(r.timestamp_s);
   $("r-tc").textContent = r.timestamp; $("r-frame").textContent = `frame ${r.frame_index}`;
-  $("r-route").textContent = `${r.source} · ${r.confidence}`; $("result").dataset.route = r.source.startsWith("ocr") ? "ocr" : "audio";
+  $("r-route").textContent = `${r.source} · ${r.confidence}`; $("result").dataset.route = $("timeline").dataset.route = r.source.startsWith("ocr") ? "ocr" : "audio";
   $("r-img").src = `/jobs/${jobId}/frames/${r.frame_index}.png`; $("r-img-cap").textContent = `frame ${r.frame_index} — ${r.timestamp}`;
   if (r.frame_index > 0) { $("r-prev").src = `/jobs/${jobId}/frames/${r.frame_index - 1}.png`; $("r-prev-cap").textContent = `frame ${r.frame_index - 1}${r.appearance ? " — " + r.appearance : ""}`; }
   $("r-text").textContent = r.text; $("r-note").textContent = r.note || "";

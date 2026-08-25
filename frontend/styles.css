@@ -204,9 +204,11 @@ body {
   bottom: 0;
   background: var(--amber);
   opacity: .35;
+  min-width: 6px;
+  z-index: 1;
 }
 
-.ticks { position: absolute; inset: 0; }
+.ticks { position: absolute; inset: 0; z-index: 2; }
 
 .ticks i {
   position: absolute;
@@ -227,7 +229,11 @@ body {
   width: 2px;
   background: var(--teal);
   transition: left 150ms ease-out;
+  z-index: 3;
 }
+
+#timeline[data-route="audio"] .marker { background: var(--amber); }
+#timeline[data-route="ocr"] .marker { background: var(--teal); }
 
 .marker .tc {
   position: absolute;
@@ -236,6 +242,9 @@ body {
   transform: translateX(-50%);
   color: var(--teal);
 }
+
+#timeline[data-route="audio"] .marker .tc { color: var(--amber); }
+#timeline[data-route="ocr"] .marker .tc { color: var(--teal); }
 
 .hint { color: var(--muted); font-size: 13px; margin: 0; }
 
@@ -252,11 +261,11 @@ body {
 
 .stages li {
   display: grid;
-  grid-template-columns: auto 1fr;
-  align-items: center;
-  gap: 10px;
+  grid-template-columns: 12px 7.5em 1fr;
+  align-items: baseline;
+  gap: 0 10px;
   font-size: 14px;
-  padding: 4px 0;
+  padding: 6px 0;
 }
 
 .stages li::before {
@@ -265,6 +274,7 @@ body {
   height: 8px;
   border-radius: 50%;
   background: var(--muted);
+  align-self: center;
   justify-self: center;
 }
 
@@ -280,7 +290,8 @@ body {
 
 .stages b {
   font-weight: 500;
-  text-transform: capitalize;
+  text-transform: lowercase;
+  text-align: left;
 }
 
 .stages .msg {
@@ -289,6 +300,15 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+@media (max-width: 720px) {
+  .stages .msg {
+    grid-column: 2 / -1;
+    white-space: normal;
+    overflow: visible;
+    text-overflow: clip;
+  }
 }
 
 @keyframes pulse {
