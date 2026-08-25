@@ -12,13 +12,16 @@
 
 ## Global Constraints
 
-- Branch `plan-4-visual-mode` from `plan-2-web-ui` (HEAD 2bd2757). Local git only, never push. Commit after every task; code-simplifier pass after each implementer before review; SOLID/DRY/KISS; protocols are the only seams (`FaceDetector`, `SpeakerDetector`).
+- Branch `plan-4-visual-mode` from `plan-2-web-ui` (HEAD 22ed98d, which includes the spec and this plan). Local git only, never push. Commit after every task; code-simplifier pass after each implementer before review; SOLID/DRY/KISS; protocols are the only seams (`FaceDetector`, `SpeakerDetector`).
 - Python `.venv/Scripts/python` (3.14, Windows). Tests from `backend/`: `../.venv/Scripts/python -m pytest -q` (74 passing at start; `-m "not slow"` fast subset).
 - Modes: `audio`, `ocr`, `audio+ocr` (old hybrid, behaviour byte-identical), `hybrid` (new, default). Measured runs recorded before 2026-08-25 in APPROACH keep the label "hybrid" meaning audio+ocr — add one note, do not rewrite history.
 - LR-ASD only inside candidate windows (window ± `window_pad_s`, plus 1 s before for onset search). Torch is CPU-only on Python 3.14/Windows — acceptable (0.84 M params).
 - "No usable face" → `uncertain`, never `invalid`. Usable track: ≥ `min_track_s` (0.5 s) and median face height ≥ `min_face_px` (40).
 - Thresholds only in `config.py`: `asd_threshold 0.5`, `asd_min_active 0.3`, `asd_onset_frames 3`, `min_track_s 0.5`, `min_face_px 40`, `max_occurrences 5`, `onset_lookback_s 1.0`, `models_dir = cache_dir / "models"`.
 - Never a traceback: missing extras, missing weights, no faces, ASD failure → events + degrade, never a crash.
+- **`visual/lrasd.py` must not import torch (or python_speech_features) at module level.** `asd_available()` checks `importlib.util.find_spec("torch")` and the weights; `LrAsdDetector` imports torch inside its lazy `_load()`. `pipeline.py` imports `asd_available` from `dialogue_finder.visual.lrasd` at module level — that import must be safe on a machine without the extras.
+- **Frame-alignment convention (all visual code):** `FaceTrack.frames[j]` are absolute video indices and `FaceTrack.scores[j]` aligns to `frames[j]`; `speech[i]` is the frame at absolute index `window_start_index + i`; `classify`/`find_onset` convert between them via the window's start index. Never index a per-window list with an absolute index.
+- The 16 kHz wav for spikes/tests is found with `ls cache/*.16k.wav backend/cache/*.16k.wav` (first hit); if neither exists regenerate it with `dialogue_finder.audio.locator.extract_audio`.
 - Every prompt the user types is appended to `prompts.txt`.
 - Weight/model downloads: retry with backoff; README documents the manual `curl` fallback into `cache/models/`.
 
@@ -81,7 +84,7 @@ Install: `.venv/Scripts/python -m pip install -r requirements-asd.txt` (torch CP
 - Test: `backend/tests/test_matcher.py`, `test_audio_locator.py`, `test_pipeline.py`, `test_api.py`, `test_cli.py`
 
 **Interfaces:**
-- Produces: `Config` fields `asd_threshold=0.5, asd_min_active=0.3, asd_onset_frames=3, min_track_s=0.5, min_face_px=40, max_occurrences=5, onset_lookback_s=1.0` and property `models_dir -> cache_dir / "models"`; `models.FaceTrack(track_id: int, frames: list[int], boxes: list[tuple[int,int,int,int]], scores: list[float] = [])` with `start_index`, `end_index`, `median_height()`; `models.Occurrence(window: Window, klass: str, frame_index: int, ocr_score: float, faces: int, asd_mean: float, speaker_box: tuple|None, note: str)` with `to_dict()`; `Result` gains `occurrence_class: str = ""`, `speaker_box: list[int] | None = None`, `speaker_image_path: str = ""`, `occurrences: list[dict] = []` (all in `to_dict()`, and `format_block()` prints `Occurrence: <class>` and `Speaker  : x,y,w,h` lines when set); `matcher.all_word_windows(words, target, threshold, cap) -> list[Window]` (non-overlapping, sorted by score desc); `WhisperLocator.locate_all(video, target) -> list[Window]`; `locate()` unchanged (= first of locate_all or None); mode strings `audio | ocr | audio+ocr | hybrid` everywhere (`run()` default `"hybrid"`; the old code path now runs for `audio+ocr`; `hybrid` temporarily behaves like `audio+ocr` until Task 6 adds `_run_hybrid`).
+- Produces: `Config` fields `asd_threshold=0.5, asd_min_active=0.3, asd_onset_frames=3, min_track_s=0.5, min_face_px=40, max_occurrences=5, onset_lookback_s=1.0` and property `models_dir -> cache_dir / "models"`; `models.FaceTrack(track_id: int, frames: list[int], boxes: list[tuple[int,int,int,int]], scores: list[float] = field(default_factory=list))` with `start_index`, `end_index`, `median_height()`; `models.Occurrence(window: Window, klass: str, frame_index: int, ocr_score: float, faces: int, asd_mean: float, speaker_box: tuple|None, note: str)` with `to_dict()`; `Result` gains `occurrence_class: str = ""`, `speaker_box: list[int] | None = None`, `speaker_image_path: str = ""`, `occurrences: list[dict] = []` (all in `to_dict()`, and `format_block()` prints `Occurrence: <class>` and `Speaker  : x,y,w,h` lines when set); `matcher.all_word_windows(words, target, threshold, cap) -> list[Window]` (non-overlapping, sorted by score desc); `Locator` protocol gains `locate_all(video, target) -> list[Window]`; `WhisperLocator.locate_all(video, target) -> list[Window]`; `locate()` unchanged (= first of locate_all or None); mode strings `audio | ocr | audio+ocr | hybrid` everywhere (`run()` default `"hybrid"`; the old code path now runs for `audio+ocr`; `hybrid` temporarily behaves like `audio+ocr` until Task 6 adds `_run_hybrid`).
 
 - [ ] **Step 1: failing tests**
 `test_matcher.py` append:
@@ -101,7 +104,7 @@ def test_all_word_windows_empty_below_threshold():
     assert all_word_windows(words, "my mind rebels at stagnation", threshold=0.6, cap=5) == []
 ```
 `test_audio_locator.py` append (reuse the cached-words fixture pattern from `test_locate_uses_cached_words_and_threshold`): `locate_all` on a transcript containing the line twice returns 2 windows; `locate` returns the best one.
-`test_pipeline.py`: rename every `mode="hybrid"` that tests the old behaviour to `mode="audio+ocr"`; add `test_hybrid_without_extras_matches_audio_ocr` (fake locator + NoMatch extractor on the synthetic clip: `run(..., mode="hybrid")` returns `source == "audio"`, `frame_index == 120`, and a `verify` event with status `skipped` is emitted — this passes only after Task 6; mark it `@pytest.mark.xfail(strict=True, reason="Task 6")` now and remove the marker in Task 6).
+`test_pipeline.py`: rename every `mode="hybrid"` that tests the old behaviour to `mode="audio+ocr"`; add `test_hybrid_without_extras_matches_audio_ocr` (fake locator + NoMatch extractor on the synthetic clip: `run(..., mode="hybrid")` returns `source == "audio"`, `frame_index == 120`, and a `verify` event with status `skipped` is emitted; the test must `monkeypatch.setattr("dialogue_finder.pipeline.asd_available", lambda: (False, "requirements-asd.txt not installed"))` (patch where the pipeline looks it up — the dev venv has the extras after Task 1) — this passes only after Task 6; mark it `@pytest.mark.xfail(strict=True, reason="Task 6")` now and remove the marker in Task 6).
 `test_cli.py`: `--mode audio+ocr` accepted; `--mode bogus` exits 2. `test_api.py`: `{"mode": "audio+ocr"}` accepted (200), `"hybrid"` accepted.
 - [ ] **Step 2: run → fail.**
 - [ ] **Step 3: implement** — `config.py` fields + `models_dir` property; `models.py` dataclasses + Result fields + `format_block` lines; `matcher.all_word_windows`:
@@ -235,7 +238,7 @@ If Task 1 decided FALLBACK: this task instead implements `LipMotionDetector(mode
 ### Task 7: API + page — occurrences and the speaker frame
 
 **Files:**
-- Modify: `backend/api/main.py` (serve `frame_<n>_speaker.png` via the existing frames endpoint with `?box=1` drawing the box from the job result, or simply expose the saved PNG path through `/jobs/{id}/speaker.png`), `frontend/app.js`, `frontend/styles.css`, `frontend/index.html`
+- Modify: `backend/api/main.py` (new `GET /jobs/{id}/speaker.png` that serves the pipeline-written `Result.speaker_image_path` file — 404 when the result has none; no drawing code in the API), `frontend/app.js`, `frontend/styles.css`, `frontend/index.html`
 - Test: `backend/tests/test_api.py` (speaker image endpoint 404/200 with a fake result)
 
 **Interfaces:**
