@@ -87,10 +87,9 @@ def test_speech_mask_length_and_silence_frames(test_wav):
     assert len(mask) == 72
     assert all(isinstance(x, bool) for x in mask)
 
-    # First ~20 frames (0-0.83s) should be silence → mostly False
-    # VAD may add padding, but the first second should have very few True
+    # First 20 frames (0-0.83s) should be silence → all False
     silence_frames = sum(mask[:20])
-    assert silence_frames <= 5, "First 20 frames should be mostly silent"
+    assert silence_frames == 0, "First 20 frames should all be silent"
 
 
 def test_speech_mask_detects_tone_or_silence(test_wav):
@@ -140,7 +139,7 @@ def test_mfcc_for_video_different_fps(test_wav):
 
 def test_speech_mask_frame_alignment(test_wav):
     """speech_mask returns exactly round((end_s - start_s) * fps) entries."""
-    for fps in [24, 25, 23.976]:
+    for fps in [24, 25, 23.976, 30]:
         duration = 2.5
         mask = speech_mask(test_wav, 0, duration, fps=fps)
         expected_frames = round(duration * fps)
@@ -156,3 +155,68 @@ def test_mfcc_for_video_partial_window(test_wav):
     expected_rows = 4 * n_video_frames
     assert mfcc.shape[0] == expected_rows
     assert mfcc.shape[1] == 13
+
+
+def test_read_wav_slice_span_past_eof(test_wav):
+    """read_wav_slice handles spans entirely past EOF by returning empty array."""
+    # Request span beyond file bounds (5s to 10s, but file is only 3s)
+    samples = read_wav_slice(test_wav, 5.0, 10.0)
+    assert samples.shape == (0,)
+    assert samples.dtype == np.float32
+
+
+def test_read_wav_slice_span_partly_past_eof(test_wav):
+    """read_wav_slice clamps span that extends past EOF."""
+    # Request 2.5s to 10s (should clamp to 2.5s to 3.0s)
+    samples = read_wav_slice(test_wav, 2.5, 10.0)
+    # 0.5s @ 16kHz = 8000 samples
+    assert samples.shape == (8000,)
+
+
+def test_read_wav_slice_reversed_span(test_wav):
+    """read_wav_slice returns empty array if end_s < start_s."""
+    samples = read_wav_slice(test_wav, 2.0, 1.0)
+    assert samples.shape == (0,)
+    assert samples.dtype == np.float32
+
+
+def test_read_wav_slice_stereo_raises_error(tmp_path):
+    """read_wav_slice raises ValueError for stereo WAV files."""
+    stereo_wav = tmp_path / "stereo.wav"
+    sr = 16000
+    n_samples = sr  # 1 second
+
+    # Create stereo (2 channel) samples
+    samples_stereo = np.zeros((n_samples, 2), dtype=np.int16)
+
+    with wave.open(str(stereo_wav), "wb") as f:
+        f.setnchannels(2)
+        f.setsampwidth(2)
+        f.setframerate(sr)
+        f.writeframes(samples_stereo.tobytes())
+
+    with pytest.raises(ValueError, match="expected 16 kHz mono wav"):
+        read_wav_slice(stereo_wav, 0, 1)
+
+
+def test_mfcc_for_video_empty_span(test_wav):
+    """mfcc_for_video produces zero-filled array for empty span."""
+    mfcc = mfcc_for_video(test_wav, 5.0, 10.0, fps=25.0)
+    # Span is beyond file (5s-10s), but duration is still 5s
+    # Should produce zero-filled array for the requested duration
+    n_video_frames = round(5.0 * 25.0)
+    expected_rows = 4 * n_video_frames
+    assert mfcc.shape == (expected_rows, 13)
+    assert mfcc.dtype == np.float32
+    assert np.all(mfcc == 0)
+
+
+def test_mfcc_for_video_too_short_signal(test_wav):
+    """mfcc_for_video produces zero-filled array for signal shorter than window."""
+    # 5 ms is shorter than 25 ms window
+    mfcc = mfcc_for_video(test_wav, 0, 0.005, fps=25.0)
+    n_video_frames = round(0.005 * 25.0)  # 0 frames
+    expected_rows = 4 * n_video_frames
+    assert mfcc.shape == (expected_rows, 13)
+    assert mfcc.dtype == np.float32
+    assert np.all(mfcc == 0)

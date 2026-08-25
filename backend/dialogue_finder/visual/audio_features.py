@@ -13,7 +13,7 @@ exactly, but timestamps drift at ~0.25 s per 10 s window vs. true audio time.
 
 Implementation uses fps-aware hop size: winstep = 1.0 / (4.0 * fps)
 - mfcc_for_video(fps=25.0) → standard 100 Hz (winstep=0.010)
-- mfcc_for_video(fps=23.976) → 95.904 Hz (winstep≈0.010421) for native 23.976 fps
+- mfcc_for_video(fps=23.976) → 95.904 Hz (winstep≈0.010427) for native 23.976 fps
 - Both pad/trim to exactly 4 * n_video_frames rows to maintain alignment
 ---
 
@@ -41,14 +41,27 @@ def read_wav_slice(wav: Path, start_s: float, end_s: float) -> np.ndarray:
 
     Returns:
         float32 numpy array in range [-1, 1], shape (n_samples,).
+        Returns empty float32 array if span is empty or out of bounds.
+
+    Raises:
+        ValueError: If WAV file is not 16 kHz mono.
     """
     with wave.open(str(wav), "rb") as f:
+        # Validate format
+        if f.getnchannels() != 1 or f.getframerate() != 16000:
+            raise ValueError("expected 16 kHz mono wav produced by extract_audio")
+
         sr = f.getframerate()
         n_frames = f.getnframes()
+        duration_s = n_frames / sr
 
         # Clamp to file bounds
         start_s = max(0.0, start_s)
-        end_s = min(end_s, n_frames / sr)
+        end_s = min(end_s, duration_s)
+
+        # Ensure end >= start (return empty if span is empty or reversed)
+        if end_s <= start_s:
+            return np.array([], dtype=np.float32)
 
         # Convert to frame indices
         start_frame = int(start_s * sr)
@@ -90,6 +103,13 @@ def mfcc_for_video(wav: Path, start_s: float, end_s: float, fps: float) -> np.nd
 
     # Fps-aware hop size: ensures 4 audio frames per video frame
     winstep = 1.0 / (4.0 * fps)
+
+    # Guard: if signal is too short for a single window, return zero-filled result
+    if len(signal) < int(winlen * sr):
+        duration_s = end_s - start_s
+        n_video_frames = round(duration_s * fps)
+        target_rows = 4 * n_video_frames
+        return np.zeros((target_rows, numcep), dtype=np.float32)
 
     # Compute raw MFCC at dynamic hop size
     mfcc = python_speech_features.mfcc(
