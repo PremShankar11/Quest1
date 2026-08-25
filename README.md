@@ -57,15 +57,16 @@ Output (real run, `--mode hybrid`, this video has no burned-in subtitles so it r
 Frame numbers are 0-based. Timestamp is `HH:MM:SS.sss`.
 
 Flags: `--local <file>` (use a local file instead of `--url`), `--mode hybrid|audio|ocr` (default `hybrid`),
-`--occurrence first|last|all` (default `first`), `--verbose`/`-v`, `--json`, `--out <dir>` (default `output`).
+`--occurrence first|last|all` (default `first`), `--verbose`/`-v`, `--json`, `--out <dir>` (default `<repo>/output`).
 
 `--occurrence last|all` ranks matches inside the region that was scanned — the audio window in hybrid
 mode; use `--mode ocr` for a whole-video ranking.
 
 First run downloads faster-whisper's `base` model (approximately 150 MB), RapidOCR's models
 (approximately 10 MB), and the video
-itself. Later runs reuse `cache/` (relative to the working directory — so `backend/cache/` when run from
-`backend/`) and skip re-downloading and re-transcribing. Runs CPU-only; a CUDA GPU is used automatically
+itself. Caches live in `<repo>/cache/` and outputs in `<repo>/output/` (per-job `output/<job_id>/` for
+the web app) regardless of where you run from. Later runs reuse the cache and skip re-downloading and
+re-transcribing. Runs CPU-only; a CUDA GPU is used automatically
 when available and falls back to CPU on failure (measured — see docs/DECISIONS.md). Measured timings:
 see docs/APPROACH.md Phase 3.
 

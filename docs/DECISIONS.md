@@ -167,10 +167,13 @@ yt-dlp, static-ffmpeg, opencv-python, rapidocr + onnxruntime, faster-whisper, ra
   demand, a ten-thumbnail filmstrip costs ten PNG-encode calls against the already-cached video, not ten
   files nobody deletes.
 - AI's first `JobReporter` forwarded every `StageEvent` straight through, including a per-OCR-sample
-  progress tick from `scan`. → I moved a 200 ms debounce into `JobReporter.emit`, not into the pipeline.
-  → The pipeline shouldn't know it has a UI-specific consumer at all — the CLI's `PrintReporter` wants
-  every tick (it just doesn't print non-verbose ones), the web job store wants at most 5/s of them. Both
-  reporters can decide that independently only if `pipeline.py` stays unaware either exists.
+  progress tick from `scan`. → I moved a 200 ms debounce into `JobReporter.emit`, gated to payload-less
+  `running` ticks only (in practice `download`'s progress ticks), not into the pipeline. OCR `scan`
+  events don't need this debounce at all — the scanner itself already throttles them (`sample_num % 10
+  == 0 or is_hit`), so a 45-sample scan emits a handful of events, not 45. → The pipeline shouldn't know
+  it has a UI-specific consumer at all — the CLI's `PrintReporter` wants every tick (it just doesn't
+  print non-verbose ones), the web job store wants at most 5/s of them. Both reporters can decide that
+  independently only if `pipeline.py` stays unaware either exists.
 - AI's job store spawned a new thread per `POST /jobs` with no coordination between them. → I added a
   `threading.Lock` in `JobStore` so jobs run one at a time. → RapidOCR (onnxruntime) and faster-whisper
   are both CPU-bound and not documented as re-entrant-safe; two jobs racing on the same process would
@@ -189,8 +192,9 @@ yt-dlp, static-ffmpeg, opencv-python, rapidocr + onnxruntime, faster-whisper, ra
   constructs fine but `.transcribe()` throws a cublas load error, which is exactly the failure the
   existing fallback already catches. Installing `nvidia-cublas-cu12` / `nvidia-cudnn-cu12` and pointing
   the process at their DLLs (via a new `_ensure_cuda_path()` in `locator.py`, called only when
-  `device == "cuda"`) turns that caught failure into a working GPU run instead (measured: CPU 2 m 44 s
-  vs GPU 48.9 s on the cached test episode's `.16k.wav`, both `base`/`translate`). Packaging: the CUDA
+  `device == "cuda"`) turns that caught failure into a working GPU run instead (measured: earlier cold
+  run 2 m 44 s; same-session forced-CPU rerun 141.2 s; GPU 48.9 s — all on the cached test episode's
+  `.16k.wav`, `base`/`translate`). Packaging: the CUDA
   packages are ~1 GB and Windows/NVIDIA-specific, so they live in a separate `requirements-gpu.txt`
   rather than `requirements.txt` — a CPU-only machine never downloads them, and `_ensure_cuda_path` is
   guarded (`os.name == "nt"`, and it's a no-op when no `nvidia/*/bin` directory is on `sys.path`) so

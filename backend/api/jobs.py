@@ -30,6 +30,7 @@ class Job:
         self.events: list[StageEvent] = []
         self.result: dict | None = None
         self.error: str | None = None
+        self.detail: str | None = None
         self.video_path: str | None = None
         self.cancel = threading.Event()
         self.cond = threading.Condition()
@@ -46,7 +47,7 @@ class Job:
             self.cond.notify_all()
 
     def to_dict(self) -> dict:
-        return {"id": self.id, "status": self.status, "error": self.error, "result": self.result}
+        return {"id": self.id, "status": self.status, "error": self.error, "detail": self.detail, "result": self.result}
 
 
 class JobReporter:
@@ -55,15 +56,16 @@ class JobReporter:
     def __init__(self, job: Job) -> None:
         self.job = job
         self._seq = 0
-        self._last_tick: dict[str, float] = {}
+        self._last_tick: dict[tuple[str, str], float] = {}
 
     def emit(self, event: StageEvent) -> None:
         now = time.monotonic()
-        is_tick = event.status == "running" and event.progress is not None and not event.payload
-        if is_tick and now - self._last_tick.get(event.stage, -1.0) < DEBOUNCE_S:
+        is_tick = event.status == "running" and not event.payload
+        key = (event.stage, event.status)
+        if is_tick and now - self._last_tick.get(key, -1.0) < DEBOUNCE_S:
             return
         if is_tick:
-            self._last_tick[event.stage] = now
+            self._last_tick[key] = now
         self._seq += 1
         event.seq = self._seq
         event.t = round(now - self.job.started, 3)
@@ -76,20 +78,40 @@ def _is_local(source: str) -> bool:
     return "://" not in source
 
 
+DOWNLOAD_FAIL_PREFIX = "Could not download video"
+DOWNLOAD_FAIL_MSG = "Could not download that URL. Check it opens in a browser, or paste a local file path."
+
+
 def run_job(job: Job, cfg: Config = DEFAULT) -> None:
+    reporter = JobReporter(job)
+    if job.cancel.is_set():
+        # Cancelled while still queued (waiting on the serialised-run lock): never touched the pipeline.
+        reporter.emit(StageEvent("end", "cancelled", ""))
+        job.finish("cancelled")
+        return
     job.status = "running"
     job_cfg = Config(cache_dir=cfg.cache_dir, output_dir=cfg.output_dir / job.id)
-    reporter = JobReporter(job)
+    status = "error"
     try:
         result = run(job.req.url, job.req.text, cfg=job_cfg, reporter=reporter, mode=job.req.mode,
                      occurrence=job.req.occurrence, local=_is_local(job.req.url), should_cancel=job.cancel.is_set)
         job.result = result.to_dict()
         status = "done"
     except PipelineError as e:
-        job.error = str(e)
-        status = "cancelled" if str(e) == "cancelled" else "error"
-    reporter.emit(StageEvent("end", status, job.error or ""))
-    job.finish(status)
+        msg = str(e)
+        status = "cancelled" if msg == "cancelled" else "error"
+        if msg.startswith(DOWNLOAD_FAIL_PREFIX):
+            job.error = DOWNLOAD_FAIL_MSG
+            job.detail = msg
+        else:
+            job.error = msg
+    except Exception as e:
+        job.error = f"unexpected failure ({type(e).__name__}): {str(e)[:200]}"
+        status = "error"
+    finally:
+        payload = {"detail": job.detail} if job.detail else {}
+        reporter.emit(StageEvent("end", status, job.error or "", payload=payload))
+        job.finish(status)
 
 
 class JobStore:
@@ -104,8 +126,16 @@ class JobStore:
         return job
 
     def _serialised_run(self, job: Job) -> None:
-        with self._run_lock:
+        # Poll for the lock (instead of a plain blocking acquire) so a job cancelled while still queued
+        # behind another job's run reaches run_job() promptly instead of waiting out the whole queue.
+        while not self._run_lock.acquire(timeout=0.05):
+            if job.cancel.is_set():
+                run_job(job)   # top-of-function cancel check short-circuits before touching the pipeline
+                return
+        try:
             run_job(job)
+        finally:
+            self._run_lock.release()
 
     def get(self, job_id: str) -> Job | None:
         return self._jobs.get(job_id)

@@ -102,6 +102,59 @@ def test_cancel(monkeypatch):
         assert _wait_done(c, job_id) == "cancelled"
 
 
+def test_unexpected_exception_ends_job_with_error(monkeypatch):
+    def boom(*a, **k):
+        raise RuntimeError("boom")
+    monkeypatch.setattr(jobs_mod, "run", boom)
+    with TestClient(app) as c:
+        job_id = c.post("/jobs", json={"url": "x.mp4", "text": "hi"}).json()["id"]
+        assert _wait_done(c, job_id) == "error"
+        body = c.get(f"/jobs/{job_id}").json()
+        assert "unexpected failure" in body["error"] and "RuntimeError" in body["error"]
+        with c.stream("GET", f"/jobs/{job_id}/events") as s:
+            text = "".join(s.iter_text())
+        assert "event: end" in text
+
+
+def test_cancel_queued_job_does_not_wait_for_first(monkeypatch):
+    # First job holds the serialised-run lock for a while (many slow events); the second job is
+    # cancelled while still queued behind it and must reach "cancelled" quickly, not after the first.
+    monkeypatch.setattr(jobs_mod, "run", fake_run_factory(EVENTS * 200, RESULT, delay=0.05))
+    with TestClient(app) as c:
+        first_id = c.post("/jobs", json={"url": "x.mp4", "text": "hi"}).json()["id"]
+        second_id = c.post("/jobs", json={"url": "y.mp4", "text": "hi"}).json()["id"]
+        assert c.post(f"/jobs/{second_id}/cancel").status_code == 200
+        t0 = time.time()
+        assert _wait_done(c, second_id, timeout=1.0) == "cancelled"
+        assert time.time() - t0 < 1.0
+        c.post(f"/jobs/{first_id}/cancel")   # don't leak a ~10 s lock hold into later tests
+        _wait_done(c, first_id, timeout=5.0)
+
+
+def test_download_failure_gets_friendly_message_and_detail(monkeypatch):
+    original = "Could not download video: ERROR: [generic] x"
+    monkeypatch.setattr(jobs_mod, "run", fake_run_factory(EVENTS[:0], error=original))
+    with TestClient(app) as c:
+        job_id = c.post("/jobs", json={"url": "bad", "text": "hi"}).json()["id"]
+        assert _wait_done(c, job_id) == "error"
+        body = c.get(f"/jobs/{job_id}").json()
+        assert body["error"] == "Could not download that URL. Check it opens in a browser, or paste a local file path."
+        assert body["detail"] == original
+
+
+def test_sse_replays_terminal_end_past_last_event_id():
+    with TestClient(app) as c:
+        req = jobs_mod.JobRequest(url="x", text="y")
+        job = jobs_mod.Job(req)
+        store._jobs[job.id] = job
+        job.add(StageEvent("download", "ok", "video ready", seq=1))
+        job.add(StageEvent("end", "done", "", seq=2))
+        job.finish("done")
+        with c.stream("GET", f"/jobs/{job.id}/events", headers={"Last-Event-ID": "2"}) as s:
+            text = "".join(s.iter_text())
+        assert "event: end" in text
+
+
 def test_frames_404_without_video():
     with TestClient(app) as c:
         assert c.get("/jobs/nope/frames/1.png").status_code == 404

@@ -9,7 +9,10 @@ const tc = (s) => {
 };
 const pct = (s) => duration ? `${Math.min(100, Math.max(0, s / duration * 100))}%` : "0%";
 const setState = (s, label) => { status.dataset.state = s; status.textContent = label || s; };
-const showError = (msg) => { error.textContent = msg; error.hidden = false; setState("error", "error"); };
+const showError = (msg, detail) => {
+  error.innerHTML = escapeHtml(msg) + (detail ? `<br><small class="muted">${escapeHtml(detail)}</small>` : "");
+  error.hidden = false; setState("error", "error");
+};
 
 function reset() {
   error.hidden = true; $("result").hidden = true; $("cands-block").hidden = true; $("transcript-block").hidden = true;
@@ -50,7 +53,7 @@ function onEvent(e) {
   }
   if (ev.stage === "refine" && p.frame_index !== undefined && fps) placeMarker(p.frame_index / fps);   // ok AND fallback routes
   if (ev.stage === "error") showError(ev.message);
-  if (ev.stage === "end") finish(ev.status, ev.message);
+  if (ev.stage === "end") finish(ev.status, ev.message, p);
 }
 
 function addCandidate(frame, score, text) {
@@ -64,11 +67,14 @@ function addCandidate(frame, score, text) {
 
 function placeMarker(t) { const m = $("marker"); m.style.left = pct(t); $("marker-tc").textContent = tc(t); m.hidden = false; }
 
-async function finish(st, msg) {
+async function finish(st, msg, payload) {
   if (es) { es.close(); es = null; }
   $("go").disabled = false; $("go").textContent = "Find frame"; $("cancel").hidden = true;
+  document.querySelectorAll('#stages li[data-status="running"]').forEach((li) => {
+    li.dataset.status = st === "done" ? "ok" : "skipped";
+  });
   if (st === "cancelled") { setState("idle", "cancelled"); hint.textContent = "Stopped."; return; }
-  if (st === "error") { showError(msg || "The run failed. Check the server log."); return; }
+  if (st === "error") { showError(msg || "The run failed. Check the server log.", payload && payload.detail); return; }
   let job;
   try {
     job = await (await fetch(`/jobs/${jobId}`)).json();

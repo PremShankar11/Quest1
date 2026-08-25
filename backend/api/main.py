@@ -66,10 +66,19 @@ def job_events(job_id: str, request: Request) -> StreamingResponse:
     def stream():
         i = start
         while True:
+            terminal_event = None
             with job.cond:
                 if i >= len(job.events):
-                    job.cond.wait(timeout=KEEPALIVE_S)
+                    if job.status in ("done", "error", "cancelled") and job.events:
+                        # Reconnected (or replaying Last-Event-ID) past the end of an already-finished
+                        # job: replay the stored terminal `end` event instead of keepalive-looping.
+                        terminal_event = job.events[-1]
+                    else:
+                        job.cond.wait(timeout=KEEPALIVE_S)
                 batch = job.events[i:]
+            if terminal_event is not None:
+                yield _sse(terminal_event)
+                return
             if not batch:
                 yield ": keepalive\n\n"
                 continue
@@ -89,6 +98,8 @@ def job_frame(job_id: str, index: int, w: int | None = None) -> Response:
     if not job.video_path or not Path(job.video_path).exists():
         raise HTTPException(404, "video not available for this job")
     with FrameSource(job.video_path) as src:
+        if index < 0 or index >= src.frame_count:
+            raise HTTPException(404, "frame index out of range")
         frame = src.frame_at(index)
     if w:
         h = int(frame.shape[0] * w / frame.shape[1])

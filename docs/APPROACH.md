@@ -385,21 +385,24 @@ reconnect logic of its own.
 | stage | status seen | payload | meaning |
 |---|---|---|---|
 | download | ok | `path, fps, frame_count, duration_s` | video fetched or opened locally |
-| transcribe | running | — | Whisper transcribing the audio track |
-| locate | ok / fallback / skipped | `window {start_s, end_s}, score` (on ok) | audio window found / no audio match found (will scan whole video) or the audio stage itself failed / mode doesn't use audio |
+| transcribe | running | `{start, end, text}` per segment (none on a transcript cache hit) | Whisper transcribing the audio track |
+| locate | ok / fallback / skipped | `{"window": {start_s, end_s, score, matched_text}}` (on ok) | audio window found / no audio match found (will scan whole video) or the audio stage itself failed / mode doesn't use audio |
 | scan | running / fallback | progress, best score so far | OCR sampling the window, the widened retry, or the whole video |
-| refine | ok / fallback | `frame_index` (on ok; score is in the message) | binary search landed the exact frame / falling back to the audio timestamp or best-effort frame |
+| refine | ok / fallback | `frame_index` on **both** ok and fallback (the audio route's marker; score is in the message on ok) | binary search landed the exact frame / falling back to the audio timestamp or best-effort frame |
 | done | ok | — (no payload) | pipeline finished; message only, no result data |
 | error | error | — | unexpected failure, translated to a one-line message |
-| end | done / error / cancelled | — | terminal event; closes the stream (client and server both stop on it) |
+| end | done / error / cancelled | may carry `{"detail"}` (the technical text behind a friendly error message) | terminal event; closes the stream (client and server both stop on it) |
 
 The `done` event carries no payload — it's a message-only marker that the pipeline finished. The result
 itself reaches the page separately: on `end`, the frontend (`frontend/app.js:finish()`) calls
 `GET /jobs/{id}` to fetch `{status, result, error}`, rather than the result being pushed over SSE.
 
-Debounce (200 ms, `JobReporter.emit` in `api/jobs.py`) drops repeat `running`/progress-only ticks from
-the same stage so a 45-sample OCR scan doesn't push 45 near-identical SSE events — every `ok`/`fallback`/
-`error`/`done`/`end` event still always gets through.
+Debounce (200 ms, `JobReporter.emit` in `api/jobs.py`) applies only to payload-less `running` ticks —
+in practice just `download`'s progress ticks — so a slow download doesn't push a flood of near-identical
+SSE events; every event that carries a payload, and every non-`running` status, always gets through. OCR
+`scan` events aren't debounced by this mechanism at all — the scanner itself only calls the reporter on
+every 10th sample or a hit (`sample_num % 10 == 0 or is_hit`), so a 45-sample OCR scan already emits a
+handful of events, not 45.
 
 ### The timeline
 
