@@ -15,7 +15,9 @@ Nothing that exists changes behaviour. Only names move:
 | `audio+ocr` | Whisper locates → OCR confirms (was called `hybrid`) | renamed, behaviour identical |
 | `hybrid` | **new**: Whisper locates → OCR + face tracks + active-speaker detection → classify → pick → refine | new default |
 
-Backward compatibility: the CLI and API accept `audio+ocr` and, for one release, the alias `hybrid_v1` is not provided — the rename is documented in README/DECISIONS. Tests referencing `mode="hybrid"` for the old behaviour are updated to `audio+ocr`.
+**Default mode:** stays `hybrid` — which is now the full mode. A plain run therefore gains the verify stage; without the ASD extras it emits `verify: skipped` and produces exactly the old `audio+ocr` answer. (Open question for the user at the review gate: keep `hybrid` as default, or make `audio+ocr` the default?)
+
+Rename scope: CLI choices (`cli.py`), API `JobRequest` Literal (`backend/api/jobs.py`), the page's mode select, README/APPROACH mode tables, and every test that used `mode="hybrid"` for the old behaviour (→ `audio+ocr`). **Measured runs recorded before 2026-08-25 in APPROACH Phases 3, 4 and 6 keep the label `hybrid`, meaning audio+ocr** — history is not rewritten; one note says so.
 
 ## 2. Flow of the new `hybrid` mode
 
@@ -70,7 +72,13 @@ requirements-asd.txt                     # torch (CPU wheel), python_speech_feat
 frontend/                                # mode option, Occurrences block, face box overlay, timeline occurrence marks
 ```
 
+Also touched: `backend/api/jobs.py` (mode Literal), `backend/dialogue_finder/cli.py` (choices), tests.
+
 Protocols (the only seams): `SpeakerDetector.score(crops: np.ndarray, mfcc: np.ndarray) -> list[float]`; `FaceDetector.detect(frame) -> list[bbox]`. Fakes implement them in tests.
+
+**Spike-owned constants.** The LR-ASD preprocessing above (112×112 grey crops, 13-d MFCC at 100 Hz, `python_speech_features`, 25 fps ↔ 4 audio frames per video frame, weight file name/size, `torch.load` compatibility on Python 3.14 CPU torch, per-window CPU cost) is reconstructed from the TalkNet lineage and is **confirmed or corrected by Plan 4's Task 1 spike** from the vendored repository; the 23.976 fps video is aligned by trimming to the shorter of the two streams as the reference demo does. If the spike fails (weights do not load, or a 10 s window costs > 60 s on CPU), the fallback engine is the lip-motion heuristic of §10 behind the same `SpeakerDetector` protocol — a decision gate, not a rewrite.
+
+**Weight download.** GitHub downloads via Python `requests` were connection-reset on this network once before (static-ffmpeg, Plan 1); `lrasd.py` fetches with retries and the README documents the manual `curl` fallback into `cache/models/`.
 
 ## 7. UI
 
