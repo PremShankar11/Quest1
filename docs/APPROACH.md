@@ -434,3 +434,30 @@ CPU-bound, so a concurrent pipeline on the same machine plausibly slowed this on
 101.88 s as an upper bound, not the steady-state number; 63.7 s (Phase 3, idle machine, warm process)
 is the more representative figure. The OCR-only run (29.37 s) has no audio model to load and is shorter
 in absolute terms, but is under the same concurrent-load caveat.
+
+### Validation
+
+End-to-end pass through the actual UI (Task 5, Plan 2), driven with Playwright against a server started
+the way the interviewer will: `powershell -ExecutionPolicy Bypass -File start.ps1` from a fresh shell.
+The script opened `http://127.0.0.1:8000` in the default browser and started uvicorn in the foreground
+— both worked as documented, no changes needed.
+
+| run | route | result | wall time (click → result/error) | correct? |
+|---|---|---|---|---|
+| ok.ru episode by URL, "My mind rebels at stagnation", hybrid | audio (amber window 325.1-327.8s, ~05:25, score 0.95) | frame 7794 / 00:05:25.073 / audio / MEDIUM | 90.9 s | yes — matches CLI (Phase 3) exactly |
+| Squid Game YouTube URL, "In my town, we had a game called the Squid Game.", hybrid | ocr (teal; window 24.6-29.6s score 0.63 → widened retry → candidate strip frames 302-1337, best 1.00) | frame 297 / 00:00:09.900 / ocr / HIGH | 164.6 s | yes — matches Phase 4 exactly |
+| bad URL `https://example.invalid/v` | download error (DNS resolution failure) | one-line red error, pill "error" | ~10 s | yes — no console errors beyond an unrelated favicon 404 |
+| Stop mid-run (ok.ru episode again, mid-`scan`) | cancelled | pill "cancelled", button re-enabled to "Find frame" | ~3 s from click | yes |
+| Refresh mid-run (ok.ru episode again, mid-`scan`) | — | page resets to idle: empty form, empty stages, no result | immediate | known limitation, not a bug — no job-resume UI; a reload does not reconnect to the in-flight job despite the SSE endpoint's `Last-Event-ID` replay support (nothing on the frontend persists the job id across a reload to make use of it) |
+
+Notes:
+
+- Run 1 was a genuine download cache hit — `cache/5f39d4605665a831.mp4` (452 MB) and its cached
+  transcript (`.words.json`) both predate this session, so the 90.9 s is dominated by the OCR scan, not
+  re-download or re-transcription.
+- Run 2's download was **not** cached at `cache/` (only a stale copy existed under `backend/cache/`,
+  which the running server's `REPO_ROOT`-derived cache path does not read) and its transcript was not
+  cached either, so this was a fresh YouTube download + fresh Korean-language Whisper transcription; the
+  network allowed the download, so the brief's cached-file fallback wasn't needed.
+- Stopping the server: only the uvicorn process started for this validation pass was killed
+  (`start.ps1`'s child process); no other process on the machine was touched.
