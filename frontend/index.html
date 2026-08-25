@@ -1,11 +1,87 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8">
-  <title>Dialogue Frame Finder</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dialogue Frame Finder</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600&family=Barlow:wght@400;500&family=JetBrains+Mono:wght@400;600&display=swap">
+<link rel="stylesheet" href="/static/styles.css">
 </head>
 <body>
-  <h1>Dialogue Frame Finder</h1>
-  <button>Find frame</button>
+<main class="page">
+  <header class="top">
+    <h1 class="title">Dialogue Frame Finder</h1>
+    <span id="status" class="pill" data-state="idle">idle</span>
+  </header>
+
+  <form id="form" class="inputs" autocomplete="off">
+    <label class="field"><span>Video URL or local path</span>
+      <input id="url" name="url" required placeholder="https://ok.ru/video/248244667877"></label>
+    <label class="field"><span>Dialogue line</span>
+      <input id="text" name="text" required placeholder="My mind rebels at stagnation"></label>
+    <button id="go" class="go" type="submit">Find frame</button>
+    <div class="options">
+      <label>mode <select id="mode"><option>hybrid</option><option>audio</option><option>ocr</option></select></label>
+      <label>occurrence <select id="occurrence"><option>first</option><option>last</option><option>all</option></select></label>
+      <button id="cancel" class="link" type="button" hidden>Stop</button>
+    </div>
+  </form>
+
+  <section class="block" aria-labelledby="tl-h">
+    <h2 id="tl-h" class="eyebrow">Timeline</h2>
+    <div class="timeline" id="timeline">
+      <span class="tc" id="tc-start">00:00:00</span>
+      <div class="bar" id="bar" role="img" aria-label="video timeline">
+        <div class="window" id="window" hidden></div>
+        <div class="ticks" id="ticks"></div>
+        <div class="marker" id="marker" hidden><span class="tc" id="marker-tc"></span></div>
+      </div>
+      <span class="tc" id="tc-end">--:--:--</span>
+    </div>
+    <p class="hint" id="hint">Paste a video URL and the line you're looking for.</p>
+  </section>
+
+  <section class="block" aria-labelledby="st-h">
+    <h2 id="st-h" class="eyebrow">Stages</h2>
+    <ol class="stages" id="stages">
+      <li data-stage="download"><b>download</b><span class="msg"></span></li>
+      <li data-stage="transcribe"><b>transcribe</b><span class="msg"></span></li>
+      <li data-stage="locate"><b>locate</b><span class="msg"></span></li>
+      <li data-stage="scan"><b>scan</b><span class="msg"></span></li>
+      <li data-stage="refine"><b>refine</b><span class="msg"></span></li>
+      <li data-stage="done"><b>done</b><span class="msg"></span></li>
+    </ol>
+  </section>
+
+  <section class="block" id="transcript-block" hidden aria-labelledby="tr-h">
+    <h2 id="tr-h" class="eyebrow">Transcript</h2>
+    <p class="transcript" id="transcript"></p>
+  </section>
+
+  <section class="block" id="cands-block" hidden aria-labelledby="ca-h">
+    <h2 id="ca-h" class="eyebrow">Candidates</h2>
+    <div class="filmstrip" id="filmstrip"></div>
+  </section>
+
+  <section class="block result" id="result" hidden aria-labelledby="re-h">
+    <h2 id="re-h" class="eyebrow">Result</h2>
+    <div class="headline">
+      <span class="big-tc" id="r-tc"></span>
+      <span class="mono" id="r-frame"></span>
+      <span class="route" id="r-route"></span>
+    </div>
+    <div class="pair">
+      <figure><img id="r-prev" alt="frame before"><figcaption id="r-prev-cap"></figcaption></figure>
+      <figure><img id="r-img" alt="found frame"><figcaption id="r-img-cap"></figcaption></figure>
+    </div>
+    <p class="text"><span class="label">Text</span> <q id="r-text"></q></p>
+    <p class="note" id="r-note"></p>
+    <p class="alts" id="r-alts"></p>
+  </section>
+
+  <p class="error" id="error" role="alert" hidden></p>
+</main>
+<script src="/static/app.js"></script>
 </body>
 </html>
