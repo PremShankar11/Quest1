@@ -250,8 +250,7 @@ def run(source_spec: str, target: str, *, cfg: Config = DEFAULT, reporter: Progr
             # ---- scan -----------------------------------------------------------
             t2 = time.perf_counter()
             if window is not None:
-                a = max(0.0, window.start_s - cfg.window_pad_s)
-                b = min(src.duration_s, window.end_s + cfg.window_pad_s)
+                a, b = window.padded(src.duration_s, cfg.window_pad_s)
                 fps = cfg.window_fps
                 reporter.emit(StageEvent("scan", "running", f"OCR {a:.1f}-{b:.1f}s at {fps} fps"))
             else:
@@ -264,8 +263,7 @@ def run(source_spec: str, target: str, *, cfg: Config = DEFAULT, reporter: Progr
             # audio+ocr from here on.
             if not groups and window is not None and mode in ("audio+ocr", "hybrid"):
                 # the window missed; retry a widened window around it (not the whole video) before giving up
-                r_a = max(0.0, window.start_s - cfg.retry_pad_s)
-                r_b = min(src.duration_s, window.end_s + cfg.retry_pad_s)
+                r_a, r_b = window.padded(src.duration_s, cfg.retry_pad_s)
                 reporter.emit(StageEvent("scan", "fallback",
                                          f"no match in window; retrying {r_a:.0f}-{r_b:.0f}s at "
                                          f"{cfg.fullscan_fps} fps"))

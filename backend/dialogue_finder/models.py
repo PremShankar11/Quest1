@@ -26,6 +26,10 @@ class Window:
     score: float
     matched_text: str
 
+    def padded(self, duration_s: float, pad_s: float) -> tuple[float, float]:
+        """(start_s - pad_s, end_s + pad_s), clamped to [0, duration_s]."""
+        return max(0.0, self.start_s - pad_s), min(duration_s, self.end_s + pad_s)
+
 
 @dataclass
 class Candidate:

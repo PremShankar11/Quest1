@@ -76,7 +76,8 @@ def _fill_gaps(frames: list[int],
     box_by_frame = dict(zip(frames, boxes))
     known = sorted(box_by_frame)
     full_frames = list(range(frames[0], frames[-1] + 1))
-    full_boxes = [box_by_frame.get(f) or box_by_frame[min(known, key=lambda k: abs(k - f))] for f in full_frames]
+    full_boxes = [box_by_frame[f] if f in box_by_frame else box_by_frame[min(known, key=lambda k: abs(k - f))]
+                 for f in full_frames]
     return full_frames, full_boxes
 
 
@@ -150,50 +151,96 @@ def confidence_for_occurrence(occ: Occurrence) -> str:
     return "MEDIUM"   # uncertain
 
 
+def _ocr_occurrence(src, window: Window, target: str, extractor, a: float, b: float, fps: float, step: int,
+                    cfg: Config, reporter: ProgressReporter,
+                    should_cancel: Callable[[], bool] | None) -> Occurrence | None:
+    """`verify_window`'s OCR stage: existing `coarse_scan` + `refine_first_frame`, same as
+    `audio+ocr`. Returns the `valid-text` Occurrence for the first hit, or None if OCR missed."""
+    cands = coarse_scan(src, extractor, target, a, b, fps, cfg, reporter, should_cancel=should_cancel)
+    hits = [c for c in cands if c.score >= cfg.ocr_match_threshold]
+    if not hits:
+        return None
+    first_hit = hits[0]
+    prev_index = max(0, first_hit.frame_index - step)
+    ocr_cand, exact = refine_first_frame(src, extractor, target, first_hit.frame_index, prev_index, cfg, step=step)
+    note = "" if exact else "text already visible at scan start; first frame may be earlier"
+    return Occurrence(window=window, klass="valid-text", frame_index=ocr_cand.frame_index,
+                      ocr_score=ocr_cand.score, faces=0, asd_mean=0.0, speaker_box=None, note=note)
+
+
+def _score_tracks(src, detector: FaceDetector, speaker: SpeakerDetector, wav, a: float, b: float,
+                  start_index: int, cfg: Config, reporter: ProgressReporter,
+                  should_cancel: Callable[[], bool] | None) -> tuple[list[FaceTrack], list[bool], int]:
+    """Builds face tracks over the padded window and scores each against the window's MFCC
+    (smoothing boxes, filling gaps, and cropping first -- see `_median_smooth_boxes`/`_fill_gaps`).
+    Returns `(scored_tracks, speech, faces)`; `faces` is the raw track count (before scoring),
+    which stays the `Occurrence.faces` value even for a class that has no speaker track."""
+    tracks = build_tracks(src, detector, start_index, src.index_for_time(b), cfg, reporter, should_cancel)
+    speech = speech_mask(wav, a, b, src.fps)
+    scored_tracks: list[FaceTrack] = []
+    if tracks:
+        mfcc = mfcc_for_video(wav, a, b, src.fps)
+        for t in tracks:
+            smoothed = _median_smooth_boxes(t.boxes)
+            full_frames, full_boxes = _fill_gaps(t.frames, smoothed)
+            crops = np.stack([crop_face(src.frame_at(f), box, CROP_SIZE)
+                              for f, box in zip(full_frames, full_boxes)])
+            rel = full_frames[0] - start_index
+            track_mfcc = mfcc[4 * rel: 4 * rel + 4 * len(full_frames)]
+            scores = speaker.score(crops, track_mfcc)
+            n = len(scores)
+            scored_tracks.append(FaceTrack(track_id=t.track_id, frames=full_frames[:n],
+                                           boxes=full_boxes[:n], scores=scores))
+    return scored_tracks, speech, len(tracks)
+
+
+def _valid_speaker_occurrence(src, window: Window, speaker_track: FaceTrack, asd_mean: float, speech: list[bool],
+                              a: float, start_index: int, fallback_frame: int, faces: int,
+                              cfg: Config) -> Occurrence:
+    """Builds the `valid-speaker` Occurrence via `find_onset()`'s visual-onset search over the
+    lookback window, falling back to `fallback_frame` (first spoken word) if no onset is found."""
+    onset_start_s = max(a, window.start_s - cfg.onset_lookback_s)
+    onset_start_index = src.index_for_time(onset_start_s)
+    end_search_index = src.index_for_time(window.end_s)
+    offset = onset_start_index - start_index
+    onset_speech = speech[offset: offset + max(0, end_search_index - onset_start_index + 1)]
+    onset = find_onset(speaker_track, onset_speech, onset_start_index, cfg)
+    if onset is not None:
+        frame_index = onset
+        note = f"on-screen speaker verified (LR-ASD mean {asd_mean:.2f})"
+    else:
+        frame_index = fallback_frame
+        note = "speaker visible; onset not observed (cut)"
+    box_by_frame = dict(zip(speaker_track.frames, speaker_track.boxes))
+    nearest = min(box_by_frame, key=lambda f: abs(f - frame_index)) if box_by_frame else None
+    speaker_box = box_by_frame.get(nearest) if nearest is not None else None
+    return Occurrence(window=window, klass="valid-speaker", frame_index=frame_index, ocr_score=0.0,
+                      faces=faces, asd_mean=asd_mean, speaker_box=speaker_box, note=note)
+
+
 def verify_window(src, window: Window, target: str, extractor, detector: FaceDetector,
                   speaker: SpeakerDetector, wav, cfg: Config, reporter: ProgressReporter,
                   should_cancel: Callable[[], bool] | None = None) -> Occurrence:
     """OCR + face tracks + LR-ASD for one candidate window -> a classified `Occurrence`.
 
-    OCR runs first (existing `coarse_scan` + `refine_first_frame`, same as `audio+ocr`); an OCR
-    hit short-circuits straight to `valid-text` without touching the visual stage at all (the
-    classification table's first row). Otherwise builds face tracks, scores them, and classifies.
+    OCR runs first (`_ocr_occurrence`); an OCR hit short-circuits straight to `valid-text`
+    without touching the visual stage at all (the classification table's first row). Otherwise
+    scores face tracks (`_score_tracks`), classifies (`classify`), and -- for "valid-speaker" --
+    locates the visual onset (`_valid_speaker_occurrence`).
     """
-    a = max(0.0, window.start_s - cfg.window_pad_s)
-    b = min(src.duration_s, window.end_s + cfg.window_pad_s)
+    a, b = window.padded(src.duration_s, cfg.window_pad_s)
     fps = cfg.window_fps
     step = max(1, int(round(src.fps / fps)))
     fallback_frame = src.index_for_time(window.start_s)
 
-    cands = coarse_scan(src, extractor, target, a, b, fps, cfg, reporter, should_cancel=should_cancel)
-    hits = [c for c in cands if c.score >= cfg.ocr_match_threshold]
-    if hits:
-        first_hit = hits[0]
-        prev_index = max(0, first_hit.frame_index - step)
-        ocr_cand, exact = refine_first_frame(src, extractor, target, first_hit.frame_index, prev_index, cfg,
-                                             step=step)
-        note = "" if exact else "text already visible at scan start; first frame may be earlier"
-        return Occurrence(window=window, klass="valid-text", frame_index=ocr_cand.frame_index,
-                          ocr_score=ocr_cand.score, faces=0, asd_mean=0.0, speaker_box=None, note=note)
+    ocr_occ = _ocr_occurrence(src, window, target, extractor, a, b, fps, step, cfg, reporter, should_cancel)
+    if ocr_occ is not None:
+        return ocr_occ
 
-    start_index, end_index = src.index_for_time(a), src.index_for_time(b)
+    start_index = src.index_for_time(a)
     try:
-        tracks = build_tracks(src, detector, start_index, end_index, cfg, reporter, should_cancel)
-        speech = speech_mask(wav, a, b, src.fps)
-        scored_tracks: list[FaceTrack] = []
-        if tracks:
-            mfcc = mfcc_for_video(wav, a, b, src.fps)
-            for t in tracks:
-                smoothed = _median_smooth_boxes(t.boxes)
-                full_frames, full_boxes = _fill_gaps(t.frames, smoothed)
-                crops = np.stack([crop_face(src.frame_at(f), box, CROP_SIZE)
-                                  for f, box in zip(full_frames, full_boxes)])
-                rel = full_frames[0] - start_index
-                track_mfcc = mfcc[4 * rel: 4 * rel + 4 * len(full_frames)]
-                scores = speaker.score(crops, track_mfcc)
-                n = len(scores)
-                scored_tracks.append(FaceTrack(track_id=t.track_id, frames=full_frames[:n],
-                                               boxes=full_boxes[:n], scores=scores))
+        scored_tracks, speech, faces = _score_tracks(src, detector, speaker, wav, a, b, start_index, cfg,
+                                                      reporter, should_cancel)
         klass, speaker_track, asd_mean = classify(0.0, scored_tracks, speech, cfg, first_index=start_index)
     except (CancelledError, PipelineError):
         raise
@@ -204,25 +251,9 @@ def verify_window(src, window: Window, target: str, extractor, detector: FaceDet
                           faces=0, asd_mean=0.0, speaker_box=None,
                           note=f"visual stage error: {type(e).__name__}: {e}")
 
-    faces = len(tracks)
     if klass == "valid-speaker":
-        onset_start_s = max(a, window.start_s - cfg.onset_lookback_s)
-        onset_start_index = src.index_for_time(onset_start_s)
-        end_search_index = src.index_for_time(window.end_s)
-        offset = onset_start_index - start_index
-        onset_speech = speech[offset: offset + max(0, end_search_index - onset_start_index + 1)]
-        onset = find_onset(speaker_track, onset_speech, onset_start_index, cfg)
-        if onset is not None:
-            frame_index = onset
-            note = f"on-screen speaker verified (LR-ASD mean {asd_mean:.2f})"
-        else:
-            frame_index = fallback_frame
-            note = "speaker visible; onset not observed (cut)"
-        box_by_frame = dict(zip(speaker_track.frames, speaker_track.boxes))
-        nearest = min(box_by_frame, key=lambda f: abs(f - frame_index)) if box_by_frame else None
-        speaker_box = box_by_frame.get(nearest) if nearest is not None else None
-        return Occurrence(window=window, klass=klass, frame_index=frame_index, ocr_score=0.0,
-                          faces=faces, asd_mean=asd_mean, speaker_box=speaker_box, note=note)
+        return _valid_speaker_occurrence(src, window, speaker_track, asd_mean, speech, a, start_index,
+                                         fallback_frame, faces, cfg)
 
     if klass == "invalid":
         return Occurrence(window=window, klass=klass, frame_index=fallback_frame, ocr_score=0.0,
