@@ -15,7 +15,7 @@ Nothing that exists changes behaviour. Only names move:
 | `audio+ocr` | Whisper locates → OCR confirms (was called `hybrid`) | renamed, behaviour identical |
 | `hybrid` | **new**: Whisper locates → OCR + face tracks + active-speaker detection → classify → pick → refine | new default |
 
-**Default mode:** stays `hybrid` — which is now the full mode. A plain run therefore gains the verify stage; without the ASD extras it emits `verify: skipped` and produces exactly the old `audio+ocr` answer. (Open question for the user at the review gate: keep `hybrid` as default, or make `audio+ocr` the default?)
+**Default mode:** stays `hybrid` — which is now the full mode. A plain run therefore gains the verify stage; without the ASD extras it emits `verify: skipped` and produces exactly the old `audio+ocr` answer. (Decided at the review gate, 2026-08-25: `hybrid` stays the default.)
 
 Rename scope: CLI choices (`cli.py`), API `JobRequest` Literal (`backend/api/jobs.py`), the page's mode select, README/APPROACH mode tables, and every test that used `mode="hybrid"` for the old behaviour (→ `audio+ocr`). **Measured runs recorded before 2026-08-25 in APPROACH Phases 3, 4 and 6 keep the label `hybrid`, meaning audio+ocr** — history is not rewritten; one note says so.
 
