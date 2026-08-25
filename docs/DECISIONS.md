@@ -154,6 +154,34 @@ yt-dlp, static-ffmpeg, opencv-python, rapidocr + onnxruntime, faster-whisper, ra
   is listening; checking once per scan sample bounds the worst-case stop latency to a single OCR
   call (under a second) rather than waiting for the whole scan or transcode to finish.
 
+## Plan 2 — Web UI (2026-08-25)
+
+- AI's first design for live progress used a WebSocket. → I changed it to Server-Sent Events. → Progress
+  only ever flows server→client (stage events); a WebSocket's bidirectionality buys nothing here but a
+  reconnect protocol I'd have to write by hand. SSE needs no extra dependency (FastAPI streams
+  `text/event-stream` natively) and the browser's built-in `EventSource` already reconnects and resends
+  `Last-Event-ID` on its own.
+- AI's first API wrote each result/candidate frame to a file under `output/` and served it as a static
+  path. → I changed it to render frames on demand from the cached video, `GET /jobs/{id}/frames/{n}.png`.
+  → Nothing was cleaning those files up, so concurrent jobs would leak PNGs into `output/` forever; on
+  demand, a ten-thumbnail filmstrip costs ten PNG-encode calls against the already-cached video, not ten
+  files nobody deletes.
+- AI's first `JobReporter` forwarded every `StageEvent` straight through, including a per-OCR-sample
+  progress tick from `scan`. → I moved a 200 ms debounce into `JobReporter.emit`, not into the pipeline.
+  → The pipeline shouldn't know it has a UI-specific consumer at all — the CLI's `PrintReporter` wants
+  every tick (it just doesn't print non-verbose ones), the web job store wants at most 5/s of them. Both
+  reporters can decide that independently only if `pipeline.py` stays unaware either exists.
+- AI's job store spawned a new thread per `POST /jobs` with no coordination between them. → I added a
+  `threading.Lock` in `JobStore` so jobs run one at a time. → RapidOCR (onnxruntime) and faster-whisper
+  are both CPU-bound and not documented as re-entrant-safe; two jobs racing on the same process would
+  either fight over the CPU with no user-visible benefit or corrupt shared model state — better to queue
+  than to guess.
+- AI's frontend draft included a light/dark theme toggle. → I cut it: one dark theme, no toggle. → The
+  design direction (this plan's brief) commits to a single deliberate look — graphite ground, amber for
+  the audio route, teal for OCR — and the only user is an interviewer watching one run once; a toggle
+  would be effort spent on a preference nobody here has expressed (same YAGNI discipline as Plan 1's
+  WhisperX call).
+
 ## Phase 1 — Build notes
 
 - **static-ffmpeg download can fail on some networks.** `static_ffmpeg.add_paths()` fetches ffmpeg/ffprobe from

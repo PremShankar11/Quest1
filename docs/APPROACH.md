@@ -360,3 +360,74 @@ runs is dominated by `whisper base` CPU transcription (60-120 s), not download.
   fps sample; not needed once the audio-first + widened-retry strategy made the whole-video path rare.
 - **Web UI (Plan 2).** Plan 1 is CLI-only by design; the live-progress web interface (FastAPI + static
   HTML/JS, decided in the stack review) is the next plan, not part of this one.
+
+## Phase 6 — Web UI
+
+FastAPI + one static page, not a framework: the stack review (docs/DECISIONS.md, Phase 1) already
+rejected Next.js/Tailwind/shadcn for this UI — two inputs, one button, a live list, a result card — in
+favour of FastAPI serving `index.html`/`app.js`/`styles.css` with vanilla JS. The one piece that page
+needs and plain HTML doesn't give for free is *live* progress; FastAPI streams Server-Sent Events
+natively (`StreamingResponse` + `text/event-stream`), so that's the only new capability the web layer
+adds over Plan 1's CLI.
+
+### SSE event contract
+
+`POST /jobs` returns a job id; `GET /jobs/{id}/events` streams one SSE event per pipeline `StageEvent`
+(`api/main.py:_sse`) — `id: {seq}`, `event: {stage}`, `data:` the JSON-encoded event. The browser's
+`EventSource` reconnects automatically and resends `Last-Event-ID`, which the endpoint replays from
+before going live (`request.headers["last-event-id"]`) — the reason SSE needed no extra dependency or
+reconnect logic of its own.
+
+| stage | status seen | payload | meaning |
+|---|---|---|---|
+| download | ok | `path, fps, frame_count, duration_s` | video fetched or opened locally |
+| transcribe | running | — | Whisper transcribing the audio track |
+| locate | ok / fallback / skipped | `window {start_s, end_s}, score` (on ok) | audio window found / no match, will scan / mode doesn't use audio |
+| scan | running / fallback | progress, best score so far | OCR sampling the window, the widened retry, or the whole video |
+| refine | ok / fallback | `frame_index, score` (on ok) | binary search landed the exact frame / falling back to the audio timestamp or best-effort frame |
+| done | ok | the full `Result` | pipeline finished, result ready |
+| error | error | — | unexpected failure, translated to a one-line message |
+| end | done / error / cancelled | — | terminal event; closes the stream (client and server both stop on it) |
+
+Debounce (200 ms, `JobReporter.emit` in `api/jobs.py`) drops repeat `running`/progress-only ticks from
+the same stage so a 45-sample OCR scan doesn't push 45 near-identical SSE events — every `ok`/`fallback`/
+`error`/`done`/`end` event still always gets through.
+
+### The timeline
+
+The page's one visual is the timeline bar described in the design direction: the whole video as a single
+strip, the amber window dropping in on `locate:ok`, teal ticks appearing at each `scan` sample (brighter
+on hits), and the result marker landing at the final timecode on `done`. It is the same "where to look →
+which frame" story the pipeline tells the CLI in text (`locate` window → `scan`/`refine` frame), just
+drawn instead of printed — one picture answers both questions the interviewer actually asks: roughly
+when, and exactly which frame.
+
+### Measured
+
+Server started for measurement on `127.0.0.1:8001` (port 8000 was in concurrent use for UI testing by
+another agent; `start.ps1`/`start.sh`/the README still document 8000, the default):
+
+    .venv/Scripts/python -m uvicorn api.main:app --app-dir backend --host 127.0.0.1 --port 8001
+
+A small httpx script `POST`ed `/jobs` and streamed `/jobs/{id}/events`, timing the first `event:` line,
+the `event: end` line, and counting events in between:
+
+    resp = httpx.post(f"{BASE}/jobs", json={"url": url, "text": text, "mode": mode})
+    with httpx.stream("GET", f"{BASE}/jobs/{job_id}/events") as r:
+        for line in r.iter_lines():
+            if line.startswith("event:"): ...
+
+| run | mode | time-to-first-event | total (to `end`) | SSE events |
+|---|---|---|---|---|
+| `cache/5f39d4605665a831.mp4`, "My mind rebels at stagnation" (transcript cache hit) | hybrid | 0.54 s | 101.88 s | 21 |
+| `bench_out/chk.mp4`, "My mind rebels at stagnation" (synthetic clip) | ocr | 1.01 s | 29.37 s | 27 |
+
+The hybrid run's total (101.88 s) is longer than the CLI's equivalent cached-transcript run in Phase 3
+(63.7 s); two factors, neither fully separable here: this was the first job the freshly-started server
+process handled, so RapidOCR/onnxruntime and faster-whisper both pay their one-time model-load cost
+inside that request instead of amortising it across a warm process; and this measurement ran while
+another agent was actively exercising the app on port 8000 for UI testing — OCR and Whisper are
+CPU-bound, so a concurrent pipeline on the same machine plausibly slowed this one down too. Treat
+101.88 s as an upper bound, not the steady-state number; 63.7 s (Phase 3, idle machine, warm process)
+is the more representative figure. The OCR-only run (29.37 s) has no audio model to load and is shorter
+in absolute terms, but is under the same concurrent-load caveat.

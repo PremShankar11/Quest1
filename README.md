@@ -2,10 +2,40 @@
 
 Given a video URL and a line of dialogue, finds the **first frame** where that dialogue appears on screen.
 
-Status: Plan 1 (pipeline + CLI) complete — 43 tests passing. The CLI is the current interface;
-a web UI is planned next (Plan 2). See docs/APPROACH.md and docs/DECISIONS.md for the full story.
+Status: Plan 1 (pipeline + CLI) and Plan 2 (web UI) both complete — 67 tests passing. The web app is the
+primary interface; the CLI underneath is unchanged. See docs/APPROACH.md and docs/DECISIONS.md for the
+full story.
 
-## Run (CLI)
+## Run the web app
+
+    .\start.ps1     # Windows
+    ./start.sh      # macOS/Linux
+
+(Create the venv first if you haven't — see the CLI section below; both scripts check for it and tell
+you if it's missing.) The script opens `http://127.0.0.1:8000` in your browser and starts the server in
+the foreground; `Ctrl+C` stops it.
+
+Paste a video URL or a local file path and the line of dialogue, press "Find frame", and watch the
+pipeline run live: the stage list ticks through download → transcribe → locate → scan → refine → done,
+a timeline bar for the whole video fills in — an amber window where the audio locates the line, teal
+ticks where OCR sampled (brighter on hits) — and it ends in a result card: the frame, the frame before
+it, timecode, text, and confidence.
+
+![Web UI](docs/ui.png)
+
+The API in five lines:
+
+- `POST /jobs` `{url, text, mode, occurrence}` → `{id}` — starts a job (`url` is a URL or a local path)
+- `GET /jobs/{id}` → `{status, result, error}`
+- `GET /jobs/{id}/events` → Server-Sent Events, one per pipeline `StageEvent`, replays from `Last-Event-ID`
+- `GET /jobs/{id}/frames/{n}.png?w=` → that frame, rendered from the cached video on demand
+- `POST /jobs/{id}/cancel` → sets a cancellation flag the pipeline checks between stages
+
+Limitations (demo scope, documented not hidden): single user, jobs live in memory only (gone on restart),
+one job runs at a time (CPU-bound OCR/Whisper aren't re-entrant-safe), first run downloads models — see
+"How it decides" below.
+
+## CLI (same pipeline)
 
     py -3.14 -m venv .venv && .venv\Scripts\pip install -r requirements.txt
     cd backend
