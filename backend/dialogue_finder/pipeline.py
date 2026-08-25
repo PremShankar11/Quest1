@@ -118,7 +118,7 @@ def run(source_spec: str, target: str, *, cfg: Config = DEFAULT, reporter: Progr
                 try:
                     from .audio.locator import WhisperLocator
                     locator = WhisperLocator(cfg, reporter)
-                except Exception as e:                      # module missing until Task 8, or import failure
+                except Exception as e:                      # import failure (missing/broken optional dependency)
                     reporter.emit(StageEvent("locate", "skipped", f"audio locator unavailable: {e}"))
             if locator is not None:
                 try:
