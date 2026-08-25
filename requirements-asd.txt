@@ -1,0 +1,3 @@
+# Optional. Active-speaker detection for --mode hybrid (LR-ASD, CPU). Install after requirements.txt.
+torch>=2.6
+python_speech_features==0.6
