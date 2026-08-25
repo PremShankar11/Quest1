@@ -61,13 +61,19 @@ function onEvent(e) {
   if (ev.stage === "end") finish(ev.status, ev.message, p);
 }
 
+function speakMarkFor(klass) {
+  if (klass === "valid-speaker") return "✓";
+  if (klass === "invalid") return "✗";
+  return "?";
+}
+
 function renderOccurrences(occurrences) {
   const list = $("occurrences"), marks = $("occ-marks");
   list.innerHTML = ""; marks.innerHTML = "";
   occurrences.forEach((occ) => {
     const w = occ.window;
     const ocrMark = occ.klass === "valid-text" ? "✓" : "✗";
-    const speakMark = occ.klass === "valid-speaker" ? "✓" : occ.klass === "invalid" ? "✗" : "?";
+    const speakMark = speakMarkFor(occ.klass);
     const li = document.createElement("li");
     li.className = "occ-row"; li.dataset.klass = occ.klass;
     const main = document.createElement("span");
@@ -120,7 +126,7 @@ async function finish(st, msg, payload) {
   setState("done", "done"); hint.textContent = "Done.";
   placeMarker(r.timestamp_s);
   $("r-tc").textContent = r.timestamp; $("r-frame").textContent = `frame ${r.frame_index}`;
-  $("r-route").textContent = r.occurrence_class ? `${r.source} · ${r.confidence} · ${r.occurrence_class}` : `${r.source} · ${r.confidence}`;
+  $("r-route").textContent = [r.source, r.confidence, r.occurrence_class].filter(Boolean).join(" · ");
   const route = r.source.startsWith("ocr") ? "ocr" : "audio";
   $("result").dataset.route = route; $("timeline").dataset.route = route;
   if (r.window) {   // hybrid can select a different window than the one `locate` first drew
