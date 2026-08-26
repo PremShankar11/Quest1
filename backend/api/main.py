@@ -95,12 +95,17 @@ def job_events(job_id: str, request: Request) -> StreamingResponse:
 @app.get("/jobs/{job_id}/speaker.png")
 def job_speaker_image(job_id: str) -> Response:
     """Serves the PNG the pipeline already wrote at Result.speaker_image_path (face box drawn
-    in visual/verifier.py) -- no drawing here."""
+    in visual/verifier.py) -- no drawing here. Only ever serves a file inside the store's
+    configured output_dir (Minor: path-traversal/stale-path hardening) -- a path elsewhere
+    (or missing) 404s the same as no result at all."""
     job = _job(job_id)
     path = job.result.get("speaker_image_path") if job.result else ""
-    if not path or not Path(path).exists():
+    if not path:
         raise HTTPException(404, "no speaker image for this job")
-    return FileResponse(path, media_type="image/png", headers={"Cache-Control": "public, max-age=3600"})
+    resolved = Path(path).resolve()
+    if not resolved.is_relative_to(store.cfg.output_dir.resolve()) or not resolved.exists():
+        raise HTTPException(404, "no speaker image for this job")
+    return FileResponse(str(resolved), media_type="image/png", headers={"Cache-Control": "public, max-age=3600"})
 
 
 @app.get("/jobs/{job_id}/frames/{index}.png")

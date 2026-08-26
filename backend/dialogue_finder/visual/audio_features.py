@@ -28,8 +28,6 @@ from pathlib import Path
 import numpy as np
 import wave
 
-from faster_whisper.vad import get_speech_timestamps, VadOptions
-
 
 def read_wav_slice(wav: Path, start_s: float, end_s: float) -> np.ndarray:
     """Read a time slice from a 16 kHz mono WAV file, returning float32 samples.
@@ -160,6 +158,8 @@ def speech_mask(wav: Path, start_s: float, end_s: float, fps: float) -> list[boo
         List of bool, length = round((end_s - start_s) * fps), where mask[i] is True
         if video frame i (at absolute time start_s + i/fps) falls within a speech segment.
     """
+    from faster_whisper.vad import get_speech_timestamps, VadOptions   # lazy: pulls in torch
+
     signal = read_wav_slice(wav, start_s, end_s)
     sr = 16000
 

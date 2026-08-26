@@ -1,10 +1,18 @@
 import hashlib
+from pathlib import Path
 
 import numpy as np
 import pytest
 
 from dialogue_finder.config import DEFAULT, REPO_ROOT
-from dialogue_finder.visual.faces import IouTracker, _verify_yunet_hash, build_tracks, crop_face
+from dialogue_finder.visual.faces import (
+    FaceDetectorUnavailable,
+    IouTracker,
+    YuNetDetector,
+    _verify_yunet_hash,
+    build_tracks,
+    crop_face,
+)
 
 
 class FakeSrc:
@@ -72,6 +80,30 @@ def test_verify_yunet_hash_accepts_matching_bytes(tmp_path):
     assert good.exists()
 
 
+# ---- I-4: missing model file + offline -> FaceDetectorUnavailable, cached ------------------
+
+def test_ensure_caches_load_failure_and_does_not_retry(monkeypatch, tmp_path):
+    """A second `_ensure()` call after a download failure must re-raise the cached error, not
+    hit the network again (no repeated downloads/timeouts, I-4)."""
+    import dialogue_finder.visual.faces as faces_mod
+
+    calls = {"n": 0}
+
+    def fake_download_yunet(dest):
+        calls["n"] += 1
+        raise IOError("offline: could not reach media.githubusercontent.com")
+
+    monkeypatch.setattr(faces_mod, "_download_yunet", fake_download_yunet)
+    det = YuNetDetector(models_dir=tmp_path / "models")
+
+    with pytest.raises(FaceDetectorUnavailable):
+        det._ensure(100, 100)
+    with pytest.raises(FaceDetectorUnavailable):
+        det._ensure(100, 100)
+
+    assert calls["n"] == 1
+
+
 @pytest.mark.slow
 def test_yunet_detects_face_on_cached_episode_frame():
     from dialogue_finder.video.frame_source import FrameSource
@@ -87,3 +119,31 @@ def test_yunet_detects_face_on_cached_episode_frame():
     boxes = detector.detect(frame)
     assert len(boxes) >= 1
     assert max(b[3] for b in boxes) >= 40
+
+
+# ---- Minor: YuNet box clipping ---------------------------------------------------------------
+
+class _FakeCvDetector:
+    def __init__(self, raw):
+        self._raw = raw
+
+    def detect(self, frame):
+        return None, self._raw
+
+
+def test_detect_clips_negative_origin_to_zero(monkeypatch):
+    """A raw detection with x<0 or y<0 (demo repro: `218,-15,304,410`) must be clamped so the
+    reported box never starts off-frame."""
+    det = YuNetDetector(models_dir=Path("unused"))
+    monkeypatch.setattr(det, "_ensure", lambda w, h: None)
+    det._detector = _FakeCvDetector(np.array([[218.0, -15.0, 304.0, 410.0]], dtype=np.float32))
+    frame = np.zeros((1000, 1000, 3), dtype=np.uint8)
+    assert det.detect(frame) == [(218, 0, 304, 395)]
+
+
+def test_detect_clips_box_extending_past_frame_edges():
+    det = YuNetDetector(models_dir=Path("unused"))
+    det._size = (500, 300)   # skip _ensure entirely: _size already matches, no reload needed
+    det._detector = _FakeCvDetector(np.array([[450.0, 250.0, 200.0, 200.0]], dtype=np.float32))
+    frame = np.zeros((300, 500, 3), dtype=np.uint8)   # H=300, W=500
+    assert det.detect(frame) == [(450, 250, 50, 50)]

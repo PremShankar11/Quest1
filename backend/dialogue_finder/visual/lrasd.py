@@ -29,7 +29,7 @@ from typing import Protocol
 import numpy as np
 
 from ..config import DEFAULT as _DEFAULT_CONFIG
-from .model_files import fetch_verified
+from .model_files import VisualStageUnavailable, fetch_verified
 
 _LRASD_COMMIT = "1b6dcd2d8fc2895683de6508ec6294ec47d388ca"
 # Ordinary git blobs at this commit (confirmed not Git-LFS-tracked in the spike), so a plain
@@ -61,6 +61,13 @@ class SpeakerDetector(Protocol):
 
 class WeightsVerificationError(IOError):
     """A weights file's SHA-256 didn't match the pinned value; the file has been deleted."""
+
+
+class SpeakerDetectorUnavailable(VisualStageUnavailable):
+    """Raised by `LrAsdDetector._load()` when the LR-ASD weights cannot be obtained -- a
+    download failure (offline, unreachable) or a hash mismatch after retries -- wrapping the
+    underlying error's message. Cached on the instance (`_load_error`) so a second `score()`
+    call re-raises immediately instead of retrying the download/timeout."""
 
 
 def _weights_url(name: str) -> str:
@@ -140,15 +147,23 @@ class LrAsdDetector:
         self.weights = weights
         self._model = None
         self._head = None
+        self._load_error: SpeakerDetectorUnavailable | None = None
 
     def _load(self) -> None:
         if self._model is not None:
             return
+        if self._load_error is not None:
+            raise self._load_error
+
         import torch
 
         from .lrasd_model import ASD_Model, AVScoreHead
 
-        weights_path = _ensure_weights(self.models_dir, self.weights)
+        try:
+            weights_path = _ensure_weights(self.models_dir, self.weights)
+        except OSError as e:      # download failure (offline) or a WeightsVerificationError
+            self._load_error = SpeakerDetectorUnavailable(f"LR-ASD weights unavailable: {e}")
+            raise self._load_error from e
         state = torch.load(weights_path, map_location="cpu", weights_only=True)
         backbone_state = {k[len("model."):]: v for k, v in state.items() if k.startswith("model.")}
         head_state = {k[len("lossAV."):]: v for k, v in state.items() if k.startswith("lossAV.FC.")}

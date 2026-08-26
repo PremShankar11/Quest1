@@ -115,9 +115,11 @@ def run_job(job: Job, cfg: Config = DEFAULT) -> None:
 
 
 class JobStore:
-    def __init__(self) -> None:
+    def __init__(self, cfg: Config = DEFAULT) -> None:
         self._jobs: dict[str, Job] = {}
         self._run_lock = threading.Lock()      # one pipeline at a time: OCR/Whisper are CPU-bound
+        self.cfg = cfg   # single source of truth for output_dir -- api/main.py's speaker.png
+                         # handler validates a job's speaker_image_path against this same cfg
 
     def create(self, req: JobRequest) -> Job:
         job = Job(req)
@@ -130,10 +132,10 @@ class JobStore:
         # behind another job's run reaches run_job() promptly instead of waiting out the whole queue.
         while not self._run_lock.acquire(timeout=0.05):
             if job.cancel.is_set():
-                run_job(job)   # top-of-function cancel check short-circuits before touching the pipeline
+                run_job(job, self.cfg)   # top-of-function cancel check short-circuits before touching the pipeline
                 return
         try:
-            run_job(job)
+            run_job(job, self.cfg)
         finally:
             self._run_lock.release()
 

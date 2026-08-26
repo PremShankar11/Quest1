@@ -493,7 +493,7 @@ default, full mode.
 | Evidence in the window | Class | Frame | Confidence |
 |---|---|---|---|
 | OCR hit ≥ `ocr_match_threshold` (0.8) | **valid-text** | OCR first frame (existing refiner) | HIGH (≥0.9) / MEDIUM |
-| No OCR; a usable face track's LR-ASD score ≥ `asd_threshold` (0.5) on ≥ `asd_min_active` (30%) of the window's speech frames | **valid-speaker** | visual onset (§4) | HIGH if mean score ≥0.7, else MEDIUM |
+| No OCR; a usable face track's LR-ASD score ≥ `asd_threshold` (0.5) on ≥ `asd_min_active` (30%) of the speech frames inside the located window (not the ±3 s padding) | **valid-speaker** | visual onset (§4) | HIGH if mean score ≥0.7, else MEDIUM |
 | No OCR; ≥1 usable track, none qualifies | **invalid** (off-screen) | first spoken word | LOW |
 | No OCR; no usable track (none detected, too short/small, or ASD unavailable) | **uncertain** | first spoken word | MEDIUM |
 

@@ -1,8 +1,14 @@
 import pytest
 
 from dialogue_finder.config import DEFAULT
-from dialogue_finder.models import FaceTrack
-from dialogue_finder.visual.verifier import _fill_gaps, _median_smooth_boxes, classify, find_onset
+from dialogue_finder.models import FaceTrack, Occurrence, Window
+from dialogue_finder.visual.verifier import (
+    _fill_gaps,
+    _median_smooth_boxes,
+    classify,
+    confidence_for_occurrence,
+    find_onset,
+)
 
 
 # ---- classify -------------------------------------------------------------
@@ -48,6 +54,41 @@ def test_classify_picks_higher_mean_track_among_qualifiers():
     assert mean == pytest.approx(0.6)
 
 
+# ---- I-3: speech denominator = the located window, not the padded region -------------------
+
+def test_classify_line_active_only_qualifies_when_denominator_is_windowed():
+    """2.6 s line (26 frames @ 10 fps) inside 9 s (90 frames) of continuous speech in the padded
+    region; the track is active only during the line. Old (whole-padded-region) denominator:
+    26/90 = 0.289 < asd_min_active (0.3) -> would fail and misclassify `invalid`. New (in-window)
+    denominator: 26/26 = 1.0 -> qualifies `valid-speaker`."""
+    speech = [True] * 90                       # continuous speech across the whole padded region
+    window_start_index, window_end_index = 32, 57   # the located window: 26 frames (2.6 s @ 10 fps)
+    scores = [0.0] * 32 + [0.9] * 26 + [0.0] * (90 - 58)
+    track = FaceTrack(track_id=0, frames=list(range(90)), boxes=[(0, 0, 80, 80)] * 90, scores=scores)
+
+    klass, chosen, mean = classify(0.0, [track], speech, DEFAULT, first_index=0,
+                                   window_start_index=window_start_index, window_end_index=window_end_index)
+    assert klass == "valid-speaker"
+    assert chosen is track
+    assert mean == pytest.approx(0.9)
+
+
+def test_classify_track_active_only_in_padding_does_not_qualify():
+    """A track active only in the ±3 s padding (outside the located window) must not count
+    towards the numerator OR the denominator -- it must not qualify, even though it's clearly
+    an active speaker somewhere in the padded region."""
+    speech = [True] * 90
+    window_start_index, window_end_index = 32, 57
+    scores = [0.9] * 32 + [0.0] * 26 + [0.9] * (90 - 58)   # active before and after the window only
+    track = FaceTrack(track_id=0, frames=list(range(90)), boxes=[(0, 0, 80, 80)] * 90, scores=scores)
+
+    klass, chosen, mean = classify(0.0, [track], speech, DEFAULT, first_index=0,
+                                   window_start_index=window_start_index, window_end_index=window_end_index)
+    assert klass == "invalid"      # a track exists but none qualifies within the window
+    assert chosen is None
+    assert mean == 0.0
+
+
 # ---- find_onset -------------------------------------------------------------
 
 def test_find_onset_finds_first_qualifying_run():
@@ -91,3 +132,22 @@ def test_fill_gaps_expands_to_contiguous_range():
     assert full_frames == [10, 11, 12, 13, 14]
     assert len(full_boxes) == 5
     assert full_boxes[2] in (boxes[1], boxes[2])   # nearest-neighbour fill for the gap
+
+
+# ---- Minor: confidence parity -- inexact OCR refine must yield MEDIUM like audio+ocr ---------
+
+def test_confidence_for_occurrence_inexact_refine_is_medium_even_at_high_score():
+    """audio+ocr forces MEDIUM when refine_first_frame couldn't pin an exact frame (text already
+    visible at scan start) regardless of score; hybrid's `valid-text` occurrences must match --
+    carried via `Occurrence.exact`."""
+    window = Window(5.0, 5.5, 0.95, "line")
+    occ = Occurrence(window=window, klass="valid-text", frame_index=120, ocr_score=0.97, faces=0,
+                     asd_mean=0.0, speaker_box=None, exact=False)
+    assert confidence_for_occurrence(occ) == "MEDIUM"
+
+
+def test_confidence_for_occurrence_exact_high_score_refine_is_high():
+    window = Window(5.0, 5.5, 0.95, "line")
+    occ = Occurrence(window=window, klass="valid-text", frame_index=120, ocr_score=0.97, faces=0,
+                     asd_mean=0.0, speaker_box=None, exact=True)
+    assert confidence_for_occurrence(occ) == "HIGH"

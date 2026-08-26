@@ -1,10 +1,73 @@
+import subprocess
+import sys
+from pathlib import Path
+
 import cv2
 import numpy as np
 import pytest
 
 from dialogue_finder.config import DEFAULT
-from dialogue_finder.models import Window
-from dialogue_finder.pipeline import PipelineError, _write_png, confidence_for, run
+from dialogue_finder.models import Candidate, Occurrence, Window
+from dialogue_finder.pipeline import PipelineError, _select_occurrence, _write_png, confidence_for, run
+from dialogue_finder.visual.lrasd import SpeakerDetectorUnavailable
+
+
+def test_importing_pipeline_does_not_pull_in_torch():
+    """I-1: faster_whisper.vad's `from faster_whisper.vad import ...` at audio_features.py's
+    top level used to pull in torch transitively; speech_mask() must import it lazily so a
+    machine with only the base requirements can still import dialogue_finder.pipeline."""
+    code = ('import sys, importlib\n'
+           'sys.modules.pop("torch", None)\n'
+           'importlib.import_module("dialogue_finder.pipeline")\n'
+           'assert "torch" not in sys.modules\n')
+    backend_dir = Path(__file__).resolve().parents[1]
+    result = subprocess.run([sys.executable, "-c", code], cwd=str(backend_dir),
+                            capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+
+
+# ---- I-2: _select_occurrence ("--occurrence last|all" in hybrid) ----------------------------
+
+def _occ(klass: str, start_s: float, score: float) -> Occurrence:
+    window = Window(start_s, start_s + 0.5, score, "line")
+    return Occurrence(window=window, klass=klass, frame_index=int(start_s * 24), ocr_score=0.0,
+                      faces=0, asd_mean=0.0, speaker_box=None)
+
+
+def _three_occurrences() -> list[Occurrence]:
+    # valid-speaker at 5s (higher ASR score 0.9) -> "first" pick; invalid at 2s -> never
+    # selected while a valid class exists; valid-speaker at 9s (lower ASR score 0.7) -> "last".
+    return [_occ("valid-speaker", 5.0, 0.9), _occ("invalid", 2.0, 0.99), _occ("valid-speaker", 9.0, 0.7)]
+
+
+def test_select_occurrence_first_picks_highest_score_then_earliest():
+    occs = _three_occurrences()
+    selected, alts = _select_occurrence(occs, "first")
+    assert selected is occs[0]        # 5s, score 0.9 -- beats the 9s one on ASR score
+    assert selected.klass == "valid-speaker"
+    assert alts == []
+
+
+def test_select_occurrence_last_picks_temporally_last_of_selected_class():
+    occs = _three_occurrences()
+    selected, alts = _select_occurrence(occs, "last")
+    assert selected is occs[2]        # 9s -- temporally last valid-speaker (invalid excluded)
+    assert selected.klass == "valid-speaker"
+    assert alts == []
+
+
+def test_select_occurrence_all_reports_first_pick_and_alternatives():
+    occs = _three_occurrences()
+    selected, alts = _select_occurrence(occs, "all")
+    assert selected is occs[0]        # same pick as "first"
+    assert len(alts) == 1 and alts[0].klass == "valid-speaker" and alts[0].window.start_s == 9.0
+
+
+def test_select_occurrence_never_picks_invalid_while_valid_exists():
+    occs = _three_occurrences()
+    for occurrence in ("first", "last", "all"):
+        selected, _ = _select_occurrence(occs, occurrence)
+        assert selected.klass != "invalid"
 
 
 def test_confidence_rules():
@@ -187,7 +250,8 @@ def test_default_paths_are_repo_anchored():
 def test_hybrid_without_extras_matches_audio_ocr(synthetic_clip, tmp_path, monkeypatch):
     """Without the ASD extras, mode="hybrid" must degrade to exactly the audio+ocr answer and
     emit a `verify: skipped` event. `_run_hybrid` (Task 6) is what makes this true; for now
-    mode="hybrid" just falls through the audio+ocr path with no verify stage at all."""
+    mode="hybrid" just falls through the audio+ocr path: verify: skipped then the audio+ocr
+    answer."""
     import dialogue_finder.pipeline as pipeline_mod
     monkeypatch.setattr(pipeline_mod, "asd_available", lambda: (False, "requirements-asd.txt not installed"))
     path, truth = synthetic_clip
@@ -263,6 +327,34 @@ def _patch_hybrid_extras(monkeypatch, detector, speaker):
     monkeypatch.setattr(verifier_mod, "mfcc_for_video", _fake_mfcc_for_video)
 
 
+class FakeUnavailableSpeaker:
+    """SpeakerDetector whose score() always raises SpeakerDetectorUnavailable (weights missing,
+    offline) -- exercises I-4's whole-run degrade to the audio+ocr answer."""
+    def score(self, crops, mfcc):
+        raise SpeakerDetectorUnavailable("weights missing (offline)")
+
+
+def test_hybrid_degrades_to_audio_ocr_when_speaker_detector_unavailable(synthetic_clip, tmp_path, monkeypatch):
+    """I-4: a `VisualStageUnavailable` raised from the first window's verify (here, the speaker
+    detector's weights are unobtainable) must degrade the WHOLE run to exactly the audio+ocr
+    answer -- one `verify skipped` event, no `occurrences` event (the verify loop never
+    completes)."""
+    _patch_hybrid_extras(monkeypatch, FakeBoxDetector(), FakeUnavailableSpeaker())
+    path, truth = synthetic_clip
+    window = Window(5.0, 5.5, 0.95, truth["text"])
+    cfg = DEFAULT.__class__(output_dir=tmp_path / "out_h4", cache_dir=tmp_path / "cache_h4")
+    reporter = CollectingReporter()
+    res = run(str(path), truth["text"], cfg=cfg, mode="hybrid", local=True,
+             extractor=FakeNoMatch(), locator=FakeLocatorAll([window]), reporter=reporter)
+
+    assert res.source == "audio"
+    assert res.frame_index == 120
+
+    skipped = [e for e in reporter.events if e.stage == "verify" and e.status == "skipped"]
+    assert len(skipped) == 1 and "weights missing (offline)" in skipped[0].message
+    assert not any(e.stage == "occurrences" for e in reporter.events)
+
+
 def test_hybrid_selects_valid_speaker_over_invalid(synthetic_clip, tmp_path, monkeypatch):
     _patch_hybrid_extras(monkeypatch, FakeBoxDetector(), FakeCountingSpeaker([0.1, 0.9]))
     path, truth = synthetic_clip
@@ -324,6 +416,46 @@ def test_hybrid_valid_text_reports_ocr_text_not_asr_text(synthetic_clip, tmp_pat
     assert res.text == ocr_text
     assert res.text != window.matched_text
 
+
+
+
+def test_hybrid_valid_text_emits_refine_ok_and_sets_appearance(synthetic_clip, tmp_path, monkeypatch):
+    """Minor: hybrid must emit a `refine ok` event (payload `frame_index`) and populate
+    `Result.appearance` via `classify_appearance` for a `valid-text` result -- matching what the
+    audio+ocr/ocr paths already do -- but only for a refined visual frame, not an audio-fallback
+    frame (uncertain/invalid, first spoken word)."""
+    _patch_hybrid_extras(monkeypatch, FakeBoxDetector(), FakeCountingSpeaker([0.0]))
+    path, truth = synthetic_clip
+    window = Window(5.0, 5.5, 0.95, truth["text"])
+    cfg = DEFAULT.__class__(output_dir=tmp_path / "out_h8", cache_dir=tmp_path / "cache_h8")
+    reporter = CollectingReporter()
+    res = run(str(path), truth["text"], cfg=cfg, mode="hybrid", local=True,
+             extractor=FakeConstantOcrExtractor("MY MIND REBELS AT STAGNATION"),
+             locator=FakeLocatorAll([window]), reporter=reporter)
+
+    assert res.occurrence_class == "valid-text"
+    assert res.appearance != ""
+
+    refine_ok = [e for e in reporter.events if e.stage == "refine" and e.status == "ok"]
+    assert len(refine_ok) == 1
+    assert refine_ok[0].payload["frame_index"] == res.frame_index
+
+
+def test_hybrid_uncertain_result_has_no_appearance_or_refine_event(synthetic_clip, tmp_path, monkeypatch):
+    """The audio-frame fallback (uncertain/invalid, frame at first spoken word) never had a
+    visual refine step -- `appearance` must stay empty and no `refine ok` event fires, same as
+    the old audio-fallback path."""
+    _patch_hybrid_extras(monkeypatch, FakeNoBoxDetector(), FakeCountingSpeaker([0.0]))
+    path, truth = synthetic_clip
+    window = Window(5.0, 5.5, 0.95, truth["text"])
+    cfg = DEFAULT.__class__(output_dir=tmp_path / "out_h9", cache_dir=tmp_path / "cache_h9")
+    reporter = CollectingReporter()
+    res = run(str(path), truth["text"], cfg=cfg, mode="hybrid", local=True,
+             extractor=FakeNoMatch(), locator=FakeLocatorAll([window]), reporter=reporter)
+
+    assert res.occurrence_class == "uncertain"
+    assert res.appearance == ""
+    assert not any(e.stage == "refine" and e.status == "ok" for e in reporter.events)
 
 def test_audio_ocr_locate_payload_has_no_windows_key(synthetic_clip, tmp_path):
     """Fix round 1: the `windows` payload key must only appear for mode="hybrid" so the old
@@ -407,3 +539,24 @@ def test_hybrid_ocr_retry_not_run_when_first_scan_hits(synthetic_clip, tmp_path,
 
     assert res.occurrence_class == "valid-text"
     assert not any(e.stage == "scan" and e.status == "fallback" for e in reporter.events)
+
+
+def test_hybrid_ocr_occurrence_emits_scan_running_before_scan_fallback(tmp_path, monkeypatch):
+    """Minor: `_ocr_occurrence`'s padded-window OCR scan must emit an initial `scan running`
+    event (mirroring run()'s audio+ocr descriptive event, no payload) BEFORE any `scan fallback`
+    retry event -- otherwise the page's scan row jumps straight to "fallback" with no "running"
+    shown first."""
+    _patch_hybrid_extras(monkeypatch, FakeBoxDetector(), FakeCountingSpeaker([0.0]))
+    clip = tmp_path / "flip.mp4"
+    _make_flip_clip(clip)
+    target = "My mind rebels at stagnation"
+    window = Window(8.0, 9.0, 0.63, target)
+    cfg = DEFAULT.__class__(output_dir=tmp_path / "out_h10", cache_dir=tmp_path / "cache_h10")
+    reporter = CollectingReporter()
+    run(str(clip), target, cfg=cfg, mode="hybrid", local=True,
+       extractor=FakeEarlyFrameExtractor(target), locator=FakeLocatorAll([window]), reporter=reporter)
+
+    scan_events = [e for e in reporter.events if e.stage == "scan"]
+    running_idx = next(i for i, e in enumerate(scan_events) if e.status == "running" and not e.payload)
+    fallback_idx = next(i for i, e in enumerate(scan_events) if e.status == "fallback")
+    assert running_idx < fallback_idx

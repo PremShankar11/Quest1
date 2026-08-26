@@ -7,6 +7,7 @@ import pytest
 from dialogue_finder.config import DEFAULT, REPO_ROOT
 from dialogue_finder.visual.lrasd import (
     LrAsdDetector,
+    SpeakerDetectorUnavailable,
     WeightsVerificationError,
     _verify_weights,
     asd_available,
@@ -91,6 +92,42 @@ def test_score_trims_to_shorter_of_video_and_audio(monkeypatch):
     assert len(probs) == 9
     assert calls["video_shape"] == (1, 9, 112, 112)
     assert calls["audio_shape"] == (1, 36, 13)
+
+
+# ---- I-4: missing weights + offline -> SpeakerDetectorUnavailable, cached ------------------
+
+def test_load_wraps_weights_download_failure(monkeypatch, tmp_path):
+    import dialogue_finder.visual.lrasd as lrasd_mod
+
+    def fake_fetch_verified(*a, **k):
+        raise IOError("offline: could not reach raw.githubusercontent.com")
+
+    monkeypatch.setattr(lrasd_mod, "fetch_verified", fake_fetch_verified)
+    det = LrAsdDetector(models_dir=tmp_path / "models")
+    with pytest.raises(SpeakerDetectorUnavailable):
+        det._load()
+
+
+def test_load_failure_is_cached_and_not_retried(monkeypatch, tmp_path):
+    """A second `_load()` call after a download failure must re-raise the cached error, not
+    hit the network again (no repeated downloads/timeouts, I-4)."""
+    import dialogue_finder.visual.lrasd as lrasd_mod
+
+    calls = {"n": 0}
+
+    def fake_fetch_verified(*a, **k):
+        calls["n"] += 1
+        raise IOError("offline: could not reach raw.githubusercontent.com")
+
+    monkeypatch.setattr(lrasd_mod, "fetch_verified", fake_fetch_verified)
+    det = LrAsdDetector(models_dir=tmp_path / "models")
+
+    with pytest.raises(SpeakerDetectorUnavailable):
+        det._load()
+    with pytest.raises(SpeakerDetectorUnavailable):
+        det._load()
+
+    assert calls["n"] == 1
 
 
 @pytest.mark.slow

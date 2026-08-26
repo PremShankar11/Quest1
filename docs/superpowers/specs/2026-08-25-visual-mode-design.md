@@ -38,7 +38,7 @@ If the ASD extras are not installed (torch or the weights missing), the `verify`
 | Evidence in the window | Class | Frame | Confidence |
 |---|---|---|---|
 | OCR hit ≥ `ocr_match_threshold` (0.8) | **valid** (on-screen text) | OCR first frame (existing refiner) | HIGH (≥ 0.9) / MEDIUM |
-| No OCR; a usable track has LR-ASD score ≥ `asd_threshold` (0.5) on ≥ `asd_min_active` (30 %) of the window's speech frames | **valid** (on-screen speaker) | visual onset (§4) | HIGH if that track's mean score over speech frames ≥ 0.7, else MEDIUM |
+| No OCR; a usable track has LR-ASD score ≥ `asd_threshold` (0.5) on ≥ `asd_min_active` (30 %) of the speech frames inside the located window (not the ±3 s padding) | **valid** (on-screen speaker) | visual onset (§4) | HIGH if that track's mean score over speech frames ≥ 0.7, else MEDIUM |
 | No OCR; ≥ 1 usable track, none meets the rule | **invalid / off-screen** | first spoken word frame | LOW |
 | No OCR; no usable track (none detected, all too short/small, or ASD unavailable) | **uncertain** | first spoken word frame | MEDIUM |
 

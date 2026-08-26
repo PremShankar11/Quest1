@@ -13,7 +13,10 @@ An *unexpected* exception during the visual scan (a bad frame decode, a model hi
 converted to an `uncertain` Occurrence with the error captured in `note` and a `verify fallback`
 event -- one bad window must never abort the whole run (plan's Global Constraints: "never a
 traceback"). `CancelledError`/`PipelineError` are not caught here; they propagate so the run
-aborts on user cancellation.
+aborts on user cancellation. `VisualStageUnavailable` (missing weights/model file, offline) also
+propagates uncaught: it isn't "one bad window" trouble -- without the detector no window can ever
+be scored -- so `pipeline._run_hybrid` catches it once for the whole run and degrades to
+audio+ocr (I-4).
 
 Frame-alignment convention (plan's Global Constraints): `FaceTrack.frames[j]` are absolute
 video indices, aligned to `scores[j]`. A `speech` list's index `i` corresponds to absolute frame
@@ -35,6 +38,7 @@ from ..text.scanner import coarse_scan, group_hits, pick_group
 from .audio_features import mfcc_for_video, speech_mask
 from .faces import FaceDetector, build_tracks, crop_face
 from .lrasd import SpeakerDetector
+from .model_files import VisualStageUnavailable
 
 CROP_SIZE = 112
 SMOOTH_KERNEL = 13   # track-box median filter kernel (controller ruling: lives here, not faces.py)
@@ -82,20 +86,34 @@ def _fill_gaps(frames: list[int],
 
 
 def classify(ocr_score: float, tracks: list[FaceTrack], speech: list[bool], cfg: Config,
-            first_index: int = 0) -> tuple[str, FaceTrack | None, float]:
+            first_index: int = 0, window_start_index: int | None = None,
+            window_end_index: int | None = None) -> tuple[str, FaceTrack | None, float]:
     """Spec section 3's classification table, evaluated for one window.
 
     `speech[i]` is the speech mask at absolute frame `first_index + i`. Returns
     `(klass, speaker_track, mean_score)`: `speaker_track`/`mean_score` are populated only for
     "valid-speaker" (`None`/`0.0` otherwise). A track "qualifies" when its score is
-    >= `cfg.asd_threshold` on >= `cfg.asd_min_active` of the window's speech frames (the
-    denominator is the count of speech-true frames in the window, per the spec); the qualifying
-    track with the highest mean score over speech frames wins ties.
+    >= `cfg.asd_threshold` on >= `cfg.asd_min_active` of the speech frames *inside the located
+    window* `[window_start_index, window_end_index]` (both inclusive, absolute frame indices) --
+    NOT the padded region `speech` may extend into; a face speaking only during the ±3 s padding
+    must not count either way (denominator, numerator, or the mean). `window_start_index`/
+    `window_end_index` default to `speech`'s whole span (via `first_index`), so callers that pass
+    an already-windowed `speech` list (every existing unit test) are unaffected. The qualifying
+    track with the highest mean score over in-window speech frames wins ties.
     """
     if ocr_score >= cfg.ocr_match_threshold:
         return "valid-text", None, 0.0
 
-    n_speech = sum(1 for s in speech if s)
+    if window_start_index is None:
+        window_start_index = first_index
+    if window_end_index is None:
+        window_end_index = first_index + len(speech) - 1
+
+    def in_window(i: int) -> bool:
+        abs_frame = first_index + i
+        return window_start_index <= abs_frame <= window_end_index
+
+    n_speech = sum(1 for i, s in enumerate(speech) if s and in_window(i))
     best_track: FaceTrack | None = None
     best_mean = 0.0
     if n_speech > 0:
@@ -104,7 +122,7 @@ def classify(ocr_score: float, tracks: list[FaceTrack], speech: list[bool], cfg:
             active = 0
             speech_scores: list[float] = []
             for i, sp in enumerate(speech):
-                if not sp:
+                if not sp or not in_window(i):
                     continue
                 sc = score_by_frame.get(first_index + i)
                 if sc is None:
@@ -141,8 +159,12 @@ def find_onset(track: FaceTrack, speech: list[bool], first_index: int, cfg: Conf
 
 
 def confidence_for_occurrence(occ: Occurrence) -> str:
-    """Spec section 3's confidence column, evaluated from a classified `Occurrence`."""
+    """Spec section 3's confidence column, evaluated from a classified `Occurrence`. An inexact
+    OCR refine (`occ.exact is False` -- text already visible at scan start, first frame may be
+    earlier) forces MEDIUM regardless of score, matching audio+ocr's `confidence_for` override."""
     if occ.klass == "valid-text":
+        if not occ.exact:
+            return "MEDIUM"
         return "HIGH" if occ.ocr_score >= 0.9 else "MEDIUM"
     if occ.klass == "valid-speaker":
         return "HIGH" if occ.asd_mean >= 0.7 else "MEDIUM"
@@ -168,6 +190,7 @@ def _ocr_occurrence(src, window: Window, target: str, extractor, a: float, b: fl
     """
     from ..pipeline import retry_ocr_scan_if_missed
 
+    reporter.emit(StageEvent("scan", "running", f"OCR {a:.1f}-{b:.1f}s at {fps} fps"))
     cands = coarse_scan(src, extractor, target, a, b, fps, cfg, reporter, should_cancel=should_cancel)
     groups = pick_group(group_hits(cands, cfg.ocr_match_threshold, cfg.hit_gap_s), "first")
     cands, groups, fps = retry_ocr_scan_if_missed(src, extractor, target, cands, groups, fps, window, cfg,
@@ -181,7 +204,7 @@ def _ocr_occurrence(src, window: Window, target: str, extractor, a: float, b: fl
     note = "" if exact else "text already visible at scan start; first frame may be earlier"
     return Occurrence(window=window, klass="valid-text", frame_index=ocr_cand.frame_index,
                       ocr_score=ocr_cand.score, faces=0, asd_mean=0.0, speaker_box=None, note=note,
-                      text=ocr_cand.text)
+                      text=ocr_cand.text, exact=exact)
 
 
 def _score_tracks(src, detector: FaceDetector, speaker: SpeakerDetector, wav, a: float, b: float,
@@ -256,8 +279,10 @@ def verify_window(src, window: Window, target: str, extractor, detector: FaceDet
     try:
         scored_tracks, speech, faces = _score_tracks(src, detector, speaker, wav, a, b, start_index, cfg,
                                                       reporter, should_cancel)
-        klass, speaker_track, asd_mean = classify(0.0, scored_tracks, speech, cfg, first_index=start_index)
-    except (CancelledError, PipelineError):
+        klass, speaker_track, asd_mean = classify(0.0, scored_tracks, speech, cfg, first_index=start_index,
+                                                  window_start_index=src.index_for_time(window.start_s),
+                                                  window_end_index=src.index_for_time(window.end_s))
+    except (CancelledError, PipelineError, VisualStageUnavailable):
         raise
     except Exception as e:
         reporter.emit(StageEvent("verify", "fallback",

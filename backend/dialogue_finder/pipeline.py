@@ -16,6 +16,7 @@ from .text.refiner import classify_appearance, refine_first_frame
 from .text.scanner import coarse_scan, group_hits, pick_group
 from .visual.faces import YuNetDetector
 from .visual.lrasd import LrAsdDetector, asd_available
+from .visual.model_files import VisualStageUnavailable
 from .visual.verifier import confidence_for_occurrence, verify_window
 
 if TYPE_CHECKING:
@@ -183,13 +184,23 @@ def _run_hybrid(src: FrameSource, video: Path, windows: list[Window], target: st
     alternatives = [Candidate(o.frame_index, src.time_for_index(o.frame_index), o.window.matched_text,
                               o.window.score) for o in alt_occs]
 
+    # valid-text/valid-speaker landed on a refined visual frame (OCR's own refiner, or the
+    # onset search); uncertain/invalid fall back to the first spoken word, same as the old
+    # audio-fallback path -- no refine step ran, so no `refine ok` event and no appearance.
+    appearance = ""
+    if selected.klass in ("valid-text", "valid-speaker"):
+        reporter.emit(StageEvent("refine", "ok", f"selected frame {selected.frame_index}", 1.0,
+                                 {"frame_index": selected.frame_index}))
+        appearance = classify_appearance(src, selected.frame_index, cfg)
+
     return _finish(src, cfg, reporter, timings, t0, selected.frame_index, "hybrid result",
                    timestamp_s=src.time_for_index(selected.frame_index),
                    text=selected.text or selected.window.matched_text,
                    confidence=confidence_for_occurrence(selected),
                    source=_SOURCE_FOR_CLASS.get(selected.klass, "audio"), note=selected.note,
                    window=selected.window, occurrence_class=selected.klass, speaker_box=speaker_box,
-                   speaker_image_path=speaker_image_path, occurrences=occ_dicts, alternatives=alternatives)
+                   speaker_image_path=speaker_image_path, occurrences=occ_dicts, alternatives=alternatives,
+                   appearance=appearance)
 
 
 def run(source_spec: str, target: str, *, cfg: Config = DEFAULT, reporter: ProgressReporter | None = None,
@@ -278,8 +289,16 @@ def run(source_spec: str, target: str, *, cfg: Config = DEFAULT, reporter: Progr
 
             # ---- hybrid verify branch --------------------------------------------
             if mode == "hybrid" and hybrid_ready and windows:
-                return _run_hybrid(src, video, windows, target, ex, cfg, reporter, timings, t0, occurrence,
-                                   should_cancel)
+                try:
+                    return _run_hybrid(src, video, windows, target, ex, cfg, reporter, timings, t0, occurrence,
+                                       should_cancel)
+                except VisualStageUnavailable as e:
+                    # A detector's weights/model file couldn't be obtained (offline, unreachable,
+                    # corrupted after retries) -- without it no window can ever be scored, so
+                    # degrade the whole run to the audio+ocr answer (I-4), same as hybrid_ready
+                    # being False from the start. `window`/`windows` etc. are already set from
+                    # the locate step above, so the audio+ocr path below runs unchanged.
+                    reporter.emit(StageEvent("verify", "skipped", str(e)))
 
             # ---- scan -----------------------------------------------------------
             t2 = time.perf_counter()

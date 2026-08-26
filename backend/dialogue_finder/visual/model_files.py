@@ -19,6 +19,14 @@ _DOWNLOAD_ATTEMPTS = 3
 _DOWNLOAD_BACKOFF_S = 1.0
 
 
+class VisualStageUnavailable(RuntimeError):
+    """Base for a visual-stage detector's load failure that couldn't be resolved (weights/model
+    file missing and unreachable, offline, or corrupted after retries). `hybrid` mode's
+    `_run_hybrid` catches this (not per-window -- for the whole run) and degrades to the
+    audio+ocr answer, since without the detector no window can ever be scored. Subclassed by
+    `visual.lrasd.SpeakerDetectorUnavailable` and `visual.faces.FaceDetectorUnavailable`."""
+
+
 def fetch_verified(
     url: str,
     dest: Path,

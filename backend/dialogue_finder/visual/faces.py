@@ -16,7 +16,7 @@ import cv2
 import numpy as np
 
 from ..config import Config
-from .model_files import fetch_verified
+from .model_files import VisualStageUnavailable, fetch_verified
 from ..models import CancelledError, FaceTrack, StageEvent
 from ..progress import ProgressReporter
 
@@ -48,6 +48,13 @@ class FaceDetector(Protocol):
     def detect(self, frame: np.ndarray) -> list[tuple[int, int, int, int]]: ...
 
 
+class FaceDetectorUnavailable(VisualStageUnavailable):
+    """Raised by `YuNetDetector._ensure()` when the YuNet model file cannot be obtained -- a
+    download failure (offline, unreachable) or a hash mismatch after retries. Cached on the
+    instance (`_load_error`) so later `detect()` calls re-raise immediately instead of retrying
+    the download/timeout."""
+
+
 def _verify_yunet_hash(path: Path, expected: str = YUNET_SHA256) -> None:
     """Raise RuntimeError (and delete `path`) if its sha256 doesn't match `expected`."""
     actual = hashlib.sha256(path.read_bytes()).hexdigest()
@@ -72,6 +79,7 @@ class YuNetDetector:
         self.score_threshold = score_threshold
         self._detector = None
         self._size: tuple[int, int] | None = None
+        self._load_error: FaceDetectorUnavailable | None = None
 
     def _model_path(self) -> Path:
         path = self.models_dir / YUNET_FILENAME
@@ -82,7 +90,14 @@ class YuNetDetector:
 
     def _ensure(self, w: int, h: int) -> None:
         if self._detector is None:
-            self._detector = cv2.FaceDetectorYN.create(str(self._model_path()), "", (w, h))
+            if self._load_error is not None:
+                raise self._load_error
+            try:
+                path = self._model_path()
+            except (OSError, RuntimeError) as e:   # download failure (offline) or a hash mismatch
+                self._load_error = FaceDetectorUnavailable(f"YuNet model unavailable: {e}")
+                raise self._load_error from e
+            self._detector = cv2.FaceDetectorYN.create(str(path), "", (w, h))
             self._detector.setScoreThreshold(self.score_threshold)
             self._size = (w, h)
         elif self._size != (w, h):
@@ -95,7 +110,16 @@ class YuNetDetector:
         _, faces = self._detector.detect(frame)
         if faces is None:
             return []
-        return [(int(round(f[0])), int(round(f[1])), int(round(f[2])), int(round(f[3]))) for f in faces]
+        return [self._clip_box(f, w, h) for f in faces]
+
+    @staticmethod
+    def _clip_box(f, w: int, h: int) -> tuple[int, int, int, int]:
+        """Clamp a raw YuNet detection to the frame: x,y >= 0 and x+w <= W, y+h <= H (YuNet can
+        report boxes that start or extend off-frame near the edges)."""
+        x, y, bw, bh = (int(round(v)) for v in f[:4])
+        x2, y2 = min(w, x + bw), min(h, y + bh)
+        x, y = max(0, x), max(0, y)
+        return x, y, x2 - x, y2 - y
 
 
 def _iou(a: tuple[int, int, int, int], b: tuple[int, int, int, int]) -> float:

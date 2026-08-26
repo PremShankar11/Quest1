@@ -191,22 +191,58 @@ def test_speaker_png_404_without_speaker_image():
         assert c.get(f"/jobs/{job.id}/speaker.png").status_code == 404
 
 
-def test_speaker_png_200_from_result_path(tmp_path):
+def test_speaker_png_200_from_result_path(tmp_path, monkeypatch):
+    """Minor: speaker.png is only served from inside the store's configured output_dir -- write
+    the PNG in a per-job dir under it (matching `run_job`'s `job_cfg.output_dir`), not an
+    arbitrary tmp_path."""
     import cv2
     import numpy as np
+
+    from dialogue_finder.config import Config
+
+    tmp_cfg = Config(cache_dir=tmp_path / "cache", output_dir=tmp_path / "output")
+    monkeypatch.setattr(store, "cfg", tmp_cfg)
 
     img = np.zeros((10, 10, 3), dtype=np.uint8)
     ok, buf = cv2.imencode(".png", img)
     assert ok
-    png_path = tmp_path / "speaker.png"
-    png_path.write_bytes(buf.tobytes())
     with TestClient(app) as c:
         job = jobs_mod.Job(jobs_mod.JobRequest(url="x", text="y"))
         store._jobs[job.id] = job
+        job_out = tmp_cfg.output_dir / job.id
+        job_out.mkdir(parents=True)
+        png_path = job_out / "speaker.png"
+        png_path.write_bytes(buf.tobytes())
         result = dataclasses.replace(RESULT, speaker_image_path=str(png_path))
         job.result = result.to_dict()
         r = c.get(f"/jobs/{job.id}/speaker.png")
         assert r.status_code == 200 and r.headers["content-type"] == "image/png"
+
+
+def test_speaker_png_404_outside_output_dir(tmp_path, monkeypatch):
+    """A `speaker_image_path` pointing outside the store's configured output_dir (path
+    traversal, or a stale/foreign path) must 404, not serve the file."""
+    import cv2
+    import numpy as np
+
+    from dialogue_finder.config import Config
+
+    tmp_cfg = Config(cache_dir=tmp_path / "cache", output_dir=tmp_path / "output")
+    monkeypatch.setattr(store, "cfg", tmp_cfg)
+
+    img = np.zeros((10, 10, 3), dtype=np.uint8)
+    ok, buf = cv2.imencode(".png", img)
+    assert ok
+    outside = tmp_path / "elsewhere" / "speaker.png"
+    outside.parent.mkdir(parents=True)
+    outside.write_bytes(buf.tobytes())
+    with TestClient(app) as c:
+        job = jobs_mod.Job(jobs_mod.JobRequest(url="x", text="y"))
+        store._jobs[job.id] = job
+        result = dataclasses.replace(RESULT, speaker_image_path=str(outside))
+        job.result = result.to_dict()
+        r = c.get(f"/jobs/{job.id}/speaker.png")
+        assert r.status_code == 404
 
 
 def test_validation_errors_are_json():
