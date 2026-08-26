@@ -103,8 +103,8 @@ function initYouTubeApi() {
 }
 initYouTubeApi();
 
-function syncVideoPlayer(url, timestamp_s) {
-  if (!url || timestamp_s === undefined || timestamp_s === null) return;
+function syncVideoPlayer(url, timestamp_s = 0, shouldScroll = false) {
+  if (!url) return;
   const playerBlock = $("player-block");
   if (!playerBlock) return;
   playerBlock.hidden = false;
@@ -126,11 +126,21 @@ function syncVideoPlayer(url, timestamp_s) {
     html5Player.hidden = true;
     fallbackPlayer.hidden = true;
 
-    const ytEmbedUrl = `https://www.youtube.com/embed/${ytId}?start=${startSec}&autoplay=0&rel=0&enablejsapi=1`;
-    if (ytIframe && (ytIframe.dataset.videoId !== ytId || ytIframe.dataset.startSec != startSec)) {
-      ytIframe.dataset.videoId = ytId;
-      ytIframe.dataset.startSec = startSec;
-      ytIframe.src = ytEmbedUrl;
+    const ytEmbedUrl = `https://www.youtube-nocookie.com/embed/${ytId}?start=${startSec}&autoplay=0&rel=0&enablejsapi=1`;
+    if (ytIframe) {
+      if (ytIframe.dataset.videoId === ytId && ytIframe.contentWindow) {
+        // Send real-time seek command to active YouTube iframe without reloading
+        try {
+          ytIframe.contentWindow.postMessage(JSON.stringify({ event: "command", func: "seekTo", args: [timestamp_s, true] }), "*");
+          ytIframe.contentWindow.postMessage(JSON.stringify({ event: "command", func: "pauseVideo", args: [] }), "*");
+        } catch {
+          ytIframe.src = ytEmbedUrl;
+        }
+      } else {
+        ytIframe.dataset.videoId = ytId;
+        ytIframe.dataset.startSec = startSec;
+        ytIframe.src = ytEmbedUrl;
+      }
     }
 
     const watchUrl = `https://www.youtube.com/watch?v=${ytId}&t=${startSec}s`;
@@ -173,6 +183,10 @@ function syncVideoPlayer(url, timestamp_s) {
       extLink.textContent = `Open Video at ${formattedTc} ↗`;
     }
   }
+
+  if (shouldScroll) {
+    playerBlock.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
 }
 
 function renderOccurrences(occurrences) {
@@ -186,7 +200,7 @@ function renderOccurrences(occurrences) {
     li.className = "occ-row"; li.dataset.klass = occ.klass;
     li.title = "Click to jump video to this scene";
     li.addEventListener("click", () => {
-      syncVideoPlayer($("url").value.trim(), w.start_s);
+      syncVideoPlayer($("url").value.trim(), w.start_s, true);
     });
 
     const main = document.createElement("span");
@@ -224,7 +238,7 @@ function addCandidate(frame, score, text, timestamp_s) {
   d.title = text ? `${text} (Click to jump video)` : "Click to jump video";
   d.addEventListener("click", () => {
     const t = timestamp_s !== undefined ? timestamp_s : (fps ? frame / fps : 0);
-    syncVideoPlayer($("url").value.trim(), t);
+    syncVideoPlayer($("url").value.trim(), t, true);
   });
   $("filmstrip").appendChild(d);
 }
@@ -267,15 +281,36 @@ async function finish(st, msg, payload) {
   $("r-alts").textContent = r.alternatives?.length ? "Also at: " + r.alternatives.map((a) => `frame ${a.frame_index} (${tc(a.timestamp_s)})`).join(", ") : "";
   $("result").hidden = false;
 
-  syncVideoPlayer($("url").value.trim(), r.timestamp_s);
+  // Make result clickable to jump video
+  $("r-tc").style.cursor = "pointer";
+  $("r-tc").title = "Click to jump video to this result";
+  $("r-tc").onclick = () => syncVideoPlayer($("url").value.trim(), r.timestamp_s, true);
+
+  $("r-img").style.cursor = "pointer";
+  $("r-img").title = "Click to jump video to this result";
+  $("r-img").onclick = () => syncVideoPlayer($("url").value.trim(), r.timestamp_s, true);
+
+  syncVideoPlayer($("url").value.trim(), r.timestamp_s, false);
 }
 
 function escapeHtml(s) { return s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
 
+// Preload player preview as user types or pastes video URL
+$("url").addEventListener("input", (e) => {
+  const u = e.target.value.trim();
+  if (u) syncVideoPlayer(u, 0, false);
+});
+$("url").addEventListener("change", (e) => {
+  const u = e.target.value.trim();
+  if (u) syncVideoPlayer(u, 0, false);
+});
+
 form.addEventListener("submit", async (e) => {
   e.preventDefault(); reset();
+  const inputUrl = $("url").value.trim();
+  syncVideoPlayer(inputUrl, 0, false);
   $("go").disabled = true; $("go").textContent = "Finding…"; setState("running", "running");
-  const body = { url: $("url").value.trim(), text: $("text").value.trim(), mode: $("mode").value, occurrence: $("occurrence").value };
+  const body = { url: inputUrl, text: $("text").value.trim(), mode: $("mode").value, occurrence: $("occurrence").value };
   const res = await fetch("/jobs", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
   if (!res.ok) { showError("The server rejected the request — check both fields are filled in."); $("go").disabled = false; $("go").textContent = "Find frame"; return; }
   jobId = (await res.json()).id; $("cancel").hidden = false;
@@ -285,3 +320,8 @@ form.addEventListener("submit", async (e) => {
 });
 $("cancel").addEventListener("click", () => jobId && fetch(`/jobs/${jobId}/cancel`, { method: "POST" }));
 
+// Load initial video preview if URL field has initial value
+const initialUrl = $("url") ? $("url").value.trim() : "";
+if (initialUrl) {
+  syncVideoPlayer(initialUrl, 0, false);
+}
