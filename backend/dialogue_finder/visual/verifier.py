@@ -177,17 +177,8 @@ def _ocr_occurrence(src, window: Window, target: str, extractor, a: float, b: fl
                     cfg: Config, reporter: ProgressReporter,
                     should_cancel: Callable[[], bool] | None) -> Occurrence | None:
     """`verify_window`'s OCR stage: `coarse_scan` the padded window and, on a miss, retry ONCE
-    over the window widened by `cfg.retry_pad_s` at `cfg.fullscan_fps` -- the identical widened
-    retry `run()`'s audio+ocr branch uses (`pipeline.retry_ocr_scan_if_missed`; a subtitle just
-    outside the ASD window, e.g. `window_pad_s` away, is otherwise missed and the occurrence
-    misclassified `invalid`/`uncertain` -- regression fix). Then `refine_first_frame`, same as
-    `audio+ocr`. Returns the `valid-text` Occurrence for the first hit (post-retry), or None if
-    OCR missed even after the retry.
-
-    `pipeline.retry_ocr_scan_if_missed` is imported here (not at module level): `pipeline.py`
-    already imports this module at its own top level, so a top-level import here would be
-    circular; by the time this function runs, `pipeline` is always already fully loaded.
-    """
+    over the window widened by `cfg.retry_pad_s` at `cfg.fullscan_fps`. Then `refine_first_frame`.
+    Returns the `valid-text` Occurrence for the first hit (post-retry), or None if OCR missed even after the retry."""
     from ..pipeline import retry_ocr_scan_if_missed
 
     reporter.emit(StageEvent("scan", "running", f"OCR {a:.1f}-{b:.1f}s at {fps} fps"))
