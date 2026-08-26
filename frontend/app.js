@@ -92,16 +92,22 @@ function renderOccurrences(occurrences) {
     const mark = document.createElement("i");
     mark.dataset.klass = occ.klass; mark.style.left = pct(w.start_s);
     marks.appendChild(mark);
+
+    if (occ.frame_index !== undefined) {
+      addCandidate(occ.frame_index, occ.window.score, occ.text || w.matched_text, w.start_s);
+    }
   });
   $("occurrences-block").hidden = false;
 }
 
-function addCandidate(frame, score, text) {
+function addCandidate(frame, score, text, timestamp_s) {
   if (seenCandidates.has(frame)) return;
   seenCandidates.add(frame);
   $("cands-block").hidden = false;
   const d = document.createElement("figure"); d.className = "cand hit";
-  d.innerHTML = `<img src="/jobs/${jobId}/frames/${frame}.png?w=320" alt="frame ${frame}" loading="lazy"><figcaption class="mono">${frame} · ${score.toFixed(2)}</figcaption>`;
+  const timeLabel = timestamp_s !== undefined ? tc(timestamp_s) : (fps ? tc(frame / fps) : "");
+  const timePrefix = timeLabel ? `${timeLabel} · ` : "";
+  d.innerHTML = `<img src="/jobs/${jobId}/frames/${frame}.png?w=320" alt="frame ${frame}" loading="lazy"><figcaption class="mono">${timePrefix}${frame} · ${score.toFixed(2)}</figcaption>`;
   d.title = text || ""; $("filmstrip").appendChild(d);
 }
 

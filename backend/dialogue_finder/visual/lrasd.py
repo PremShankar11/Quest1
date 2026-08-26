@@ -174,21 +174,38 @@ class LrAsdDetector:
         head.load_state_dict(head_state)
         model.eval()
         head.eval()   # MANDATORY: Detector has nn.Dropout(0.5); a train-mode forward corrupts scores
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        try:
+            model = model.to(device)
+            head = head.to(device)
+            self._device = device
+        except Exception:
+            self._device = "cpu"
+            model = model.to("cpu")
+            head = head.to("cpu")
         self._model = model
         self._head = head
 
     def _forward(self, audio_tensor, video_tensor) -> np.ndarray:
-        """Seam for tests: runs the real network on CPU under `torch.no_grad()` and returns
+        """Runs the network on GPU (with CPU fallback) under `torch.no_grad()` and returns
         raw (N, 2) logits as a numpy array. `audio_tensor`: (1, 4N, 13) float tensor.
         `video_tensor`: (1, N, 112, 112) float tensor, 0..255 range (normalisation happens
         inside `ASD_Model.forward_visual_frontend`, not here)."""
         import torch
 
+        device = getattr(self, "_device", "cpu")
+        try:
+            audio_tensor = audio_tensor.to(device)
+            video_tensor = video_tensor.to(device)
+        except Exception:
+            pass
         with torch.no_grad():
             audio_embed = self._model.forward_audio_frontend(audio_tensor)
             visual_embed = self._model.forward_visual_frontend(video_tensor)
             outs_av = self._model.forward_audio_visual_backend(audio_embed, visual_embed)
             logits = self._head(outs_av)
+        if hasattr(logits, "cpu"):
+            logits = logits.cpu()
         return logits.numpy()
 
     def score(self, crops: np.ndarray, mfcc: np.ndarray) -> list[float]:

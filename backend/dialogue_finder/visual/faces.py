@@ -15,6 +15,9 @@ from typing import Callable, Protocol
 import cv2
 import numpy as np
 
+# Silence internal OpenCV DNN graph engine target warnings
+cv2.utils.logging.setLogLevel(cv2.utils.logging.LOG_LEVEL_ERROR)
+
 from ..config import Config
 from .model_files import VisualStageUnavailable, fetch_verified
 from ..models import CancelledError, FaceTrack, StageEvent

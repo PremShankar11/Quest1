@@ -133,14 +133,32 @@ _CLASS_TIER = {"valid-text": 0, "valid-speaker": 0, "uncertain": 1, "invalid": 2
 _SOURCE_FOR_CLASS = {"valid-text": "ocr", "valid-speaker": "audio+asd"}
 
 
+def _tier_of(o: Occurrence, max_asr_by_class: dict[str, float]) -> int:
+    if o.klass == "valid-text":
+        return 0
+    if o.klass == "valid-speaker":
+        # A speaking face confirms the dialogue only if it's not massively outscored by a true dialogue match
+        best_unc = max_asr_by_class.get("uncertain", 0.0)
+        if best_unc >= 0.80 and o.window.score < (best_unc - 0.15):
+            return 2  # demote below uncertain when uncertain is a much better dialogue match
+        return 0
+    if o.klass == "uncertain":
+        return 1
+    return 2
+
+
 def _select_occurrence(occurrences: list[Occurrence], occurrence: str) -> tuple[Occurrence, list[Occurrence]]:
     """class order valid > uncertain > invalid; within the selected class, `occurrence` picks:
     "first"/"all" -> highest ASR score then earliest window (the plan's default selection
     order); "last" -> the temporally last window of that class. "all" reports that same pick and
     returns the rest of the class as alternatives (controller ruling); "first"/"last" return no
     alternatives."""
-    best_tier = min(_CLASS_TIER[o.klass] for o in occurrences)
-    in_class = [o for o in occurrences if _CLASS_TIER[o.klass] == best_tier]
+    max_asr_by_class: dict[str, float] = {}
+    for o in occurrences:
+        max_asr_by_class[o.klass] = max(max_asr_by_class.get(o.klass, 0.0), o.window.score)
+
+    best_tier = min(_tier_of(o, max_asr_by_class) for o in occurrences)
+    in_class = [o for o in occurrences if _tier_of(o, max_asr_by_class) == best_tier]
     ranked = sorted(in_class, key=lambda o: (-o.window.score, o.window.start_s))
     if occurrence == "last":
         return max(in_class, key=lambda o: o.window.start_s), []

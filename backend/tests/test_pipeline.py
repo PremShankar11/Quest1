@@ -70,6 +70,16 @@ def test_select_occurrence_never_picks_invalid_while_valid_exists():
         assert selected.klass != "invalid"
 
 
+def test_select_occurrence_prefers_high_asr_uncertain_over_weak_valid_speaker():
+    # 25s has ASR 0.97 (exact dialogue) but faces=0 (uncertain); 44s has ASR 0.65 with a speaking face (valid-speaker).
+    # The high ASR match must not be overridden by the unrelated speaking face.
+    exact_dialogue = _occ("uncertain", 25.0, 0.97)
+    unrelated_speaking = _occ("valid-speaker", 44.0, 0.65)
+    selected, _ = _select_occurrence([exact_dialogue, unrelated_speaking], "first")
+    assert selected is exact_dialogue
+
+
+
 def test_confidence_rules():
     assert confidence_for("ocr", 0.95, Window(1, 2, 0.9, "x")) == "HIGH"
     assert confidence_for("ocr", 0.95, None) == "HIGH"

@@ -214,7 +214,10 @@ def _score_tracks(src, detector: FaceDetector, speaker: SpeakerDetector, wav, a:
     (smoothing boxes, filling gaps, and cropping first -- see `_median_smooth_boxes`/`_fill_gaps`).
     Returns `(scored_tracks, speech, faces)`; `faces` is the raw track count (before scoring),
     which stays the `Occurrence.faces` value even for a class that has no speaker track."""
-    tracks = build_tracks(src, detector, start_index, src.index_for_time(b), cfg, reporter, should_cancel)
+    end_index = src.index_for_time(b)
+    if hasattr(src, "prefetch_range"):
+        src.prefetch_range(start_index, end_index)
+    tracks = build_tracks(src, detector, start_index, end_index, cfg, reporter, should_cancel)
     speech = speech_mask(wav, a, b, src.fps)
     scored_tracks: list[FaceTrack] = []
     if tracks:

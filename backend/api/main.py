@@ -10,6 +10,9 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
+# Silence benign internal OpenCV DNN graph engine warnings
+cv2.utils.logging.setLogLevel(cv2.utils.logging.LOG_LEVEL_ERROR)
+
 from api.jobs import Job, JobRequest, JobStore
 from dialogue_finder.config import REPO_ROOT
 from dialogue_finder.video.frame_source import FrameSource
@@ -22,9 +25,10 @@ store = JobStore()
 app.mount("/static", StaticFiles(directory=FRONTEND), name="static")
 
 
+
 @app.get("/")
 def index() -> FileResponse:
-    return FileResponse(FRONTEND / "index.html")
+    return FileResponse(FRONTEND / "index.html", headers={"Cache-Control": "no-cache, no-store, must-revalidate"})
 
 
 @app.post("/jobs")
