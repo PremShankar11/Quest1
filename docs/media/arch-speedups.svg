@@ -1,0 +1,51 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 400" width="1080" height="400" role="img" aria-label="Measured speed-ups: transcription 141 seconds on CPU versus 48.9 on GPU; one OCR read 598 milliseconds versus 20; per-window subtitle verification 28.4 seconds versus 2.5; module import 2.1 seconds versus 0.23.">
+  <rect width="1080" height="400" fill="#FBFAF7"/>
+  <style>
+    .h{font-family:"Segoe UI",Arial,sans-serif;font-size:16px;font-weight:600;fill:#1B1E23}
+    .cap{font-family:"Segoe UI",Arial,sans-serif;font-size:12px;fill:#5D636D}
+    .lab{font-family:"Segoe UI",Arial,sans-serif;font-size:13px;font-weight:600;fill:#1B1E23}
+    .sub{font-family:"Segoe UI",Arial,sans-serif;font-size:11px;fill:#8A9099}
+    .val{font-family:Consolas,monospace;font-size:12px;fill:#1B1E23}
+    .win{font-family:Consolas,monospace;font-size:12px;font-weight:700;fill:#0E7C7B}
+    .before{fill:#D9D5CB}
+    .after{fill:#0E7C7B}
+  </style>
+
+  <text class="h" x="40" y="40">What the optimisation phase bought</text>
+  <text class="cap" x="40" y="60">Grey = before · teal = after. Bars are scaled per row; the numbers are measured, not estimated.</text>
+
+  <rect class="before" x="290" y="86" width="420" height="14" rx="3"/>
+  <rect class="after" x="290" y="104" width="146" height="14" rx="3"/>
+  <text class="lab" x="40" y="98">Transcribe a 54-min episode</text>
+  <text class="sub" x="40" y="115">faster-whisper on CUDA</text>
+  <text class="val" x="720" y="98">141 s CPU</text>
+  <text class="val" x="720" y="116">48.9 s GPU</text>
+  <text class="win" x="880" y="108">2.9× faster</text>
+
+  <rect class="before" x="290" y="156" width="420" height="14" rx="3"/>
+  <rect class="after" x="290" y="174" width="14" height="14" rx="3"/>
+  <text class="lab" x="40" y="168">Read one frame with OCR</text>
+  <text class="sub" x="40" y="185">RapidOCR on onnxruntime-GPU</text>
+  <text class="val" x="720" y="168">598 ms CPU</text>
+  <text class="val" x="720" y="186">~20 ms GPU</text>
+  <text class="win" x="880" y="178">~30× faster</text>
+
+  <rect class="before" x="290" y="226" width="420" height="14" rx="3"/>
+  <rect class="after" x="290" y="244" width="37" height="14" rx="3"/>
+  <text class="lab" x="40" y="238">Verify one candidate window</text>
+  <text class="sub" x="40" y="255">single-pass OCR + frame memoisation</text>
+  <text class="val" x="720" y="238">28.4 s</text>
+  <text class="val" x="720" y="256">1.2–2.5 s</text>
+  <text class="win" x="880" y="248">~11× faster</text>
+
+  <rect class="before" x="290" y="296" width="420" height="14" rx="3"/>
+  <rect class="after" x="290" y="314" width="46" height="14" rx="3"/>
+  <text class="lab" x="40" y="308">Start the tool</text>
+  <text class="sub" x="40" y="325">lazy VAD import — torch off the hot path</text>
+  <text class="val" x="720" y="308">2.10 s</text>
+  <text class="val" x="720" y="326">0.23 s</text>
+  <text class="win" x="880" y="318">9× faster</text>
+
+  <line x1="40" y1="356" x2="1040" y2="356" stroke="#D9D5CB" stroke-width="1"/>
+  <text class="cap" x="40" y="378">Every GPU path falls back to CPU on failure — no machine is required to have a GPU for the tool to work.</text>
+</svg>

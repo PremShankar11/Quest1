@@ -1,0 +1,71 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 470" width="1080" height="470" role="img" aria-label="Decision flow for one candidate window: on-screen text makes it valid-text; otherwise a qualifying speaking face makes it valid-speaker; faces present but silent make it invalid; no usable face makes it uncertain.">
+  <defs><marker id="d" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#4A5058"/></marker></defs>
+  <rect width="1080" height="470" fill="#FBFAF7"/>
+  <style>
+    .t{font-family:"Segoe UI",Arial,sans-serif;font-size:14px;font-weight:600;fill:#1B1E23}
+    .s{font-family:"Segoe UI",Arial,sans-serif;font-size:11.5px;fill:#5D636D}
+    .m{font-family:Consolas,monospace;font-size:11px;fill:#1B1E23}
+    .y{font-family:Consolas,monospace;font-size:11px;fill:#0E7C7B;font-weight:700}
+    .n{font-family:Consolas,monospace;font-size:11px;fill:#9A5B4C;font-weight:700}
+    .q{fill:#FFFFFF;stroke:#4A5058;stroke-width:1.4}
+    .ok{fill:#E9F6F5;stroke:#0E7C7B;stroke-width:1.8}
+    .warn{fill:#FDF3E0;stroke:#B7791F;stroke-width:1.8}
+    .bad{fill:#FBEAE6;stroke:#B4543F;stroke-width:1.8}
+    .l{stroke:#4A5058;stroke-width:1.5;fill:none}
+    .cap{font-family:"Segoe UI",Arial,sans-serif;font-size:12px;fill:#5D636D}
+    .badge{font-family:Consolas,monospace;font-size:12px;font-weight:700}
+  </style>
+
+  <text class="t" x="40" y="36">One candidate window → one verdict</text>
+  <text class="cap" x="40" y="56">Every window the audio stage found is judged on its own. The strongest verdict across windows wins.</text>
+
+  <rect class="q" x="40" y="86" width="210" height="60" rx="4"/>
+  <text class="t" x="145" y="112" text-anchor="middle">Candidate window</text>
+  <text class="s" x="145" y="130" text-anchor="middle">line matched in the transcript</text>
+
+  <rect class="q" x="300" y="86" width="230" height="60" rx="4"/>
+  <text class="t" x="415" y="110" text-anchor="middle">Is the line on screen?</text>
+  <text class="m" x="415" y="130" text-anchor="middle">OCR score ≥ 0.80</text>
+  <line class="l" x1="250" y1="116" x2="298" y2="116" marker-end="url(#d)"/>
+
+  <rect class="ok" x="620" y="80" width="410" height="72" rx="4"/>
+  <text class="badge" x="646" y="106" fill="#0E7C7B">VALID-TEXT</text>
+  <text class="s" x="646" y="126">The text is readable in the frame — that is the dialogue appearing.</text>
+  <text class="m" x="646" y="144">frame = binary search for the first frame showing it · HIGH</text>
+  <line class="l" x1="530" y1="116" x2="618" y2="116" marker-end="url(#d)"/>
+  <text class="y" x="556" y="108">yes</text>
+
+  <rect class="q" x="300" y="200" width="230" height="66" rx="4"/>
+  <text class="t" x="415" y="224" text-anchor="middle">Any usable face?</text>
+  <text class="s" x="415" y="242" text-anchor="middle">tracked ≥ 0.5 s and ≥ 40 px tall</text>
+  <text class="m" x="415" y="259" text-anchor="middle">(facing away still counts as a face)</text>
+  <path class="l" d="M415,146 L415,198" marker-end="url(#d)"/>
+  <text class="n" x="424" y="176">no</text>
+
+  <rect class="warn" x="620" y="196" width="410" height="72" rx="4"/>
+  <text class="badge" x="646" y="222" fill="#B7791F">UNCERTAIN</text>
+  <text class="s" x="646" y="242">Nobody's face is usable here — the tool refuses to guess either way.</text>
+  <text class="m" x="646" y="260">frame = first spoken word · MEDIUM</text>
+  <line class="l" x1="530" y1="233" x2="618" y2="233" marker-end="url(#d)"/>
+  <text class="n" x="556" y="225">no</text>
+
+  <rect class="q" x="300" y="320" width="230" height="66" rx="4"/>
+  <text class="t" x="415" y="344" text-anchor="middle">Is one of them talking?</text>
+  <text class="s" x="415" y="362" text-anchor="middle">LR-ASD ≥ 0.5 on ≥ 30 % of</text>
+  <text class="s" x="415" y="378" text-anchor="middle">the speech frames in the window</text>
+  <path class="l" d="M415,266 L415,318" marker-end="url(#d)"/>
+  <text class="y" x="424" y="296">yes</text>
+
+  <rect class="ok" x="620" y="304" width="410" height="72" rx="4"/>
+  <text class="badge" x="646" y="330" fill="#0E7C7B">VALID-SPEAKER</text>
+  <text class="s" x="646" y="350">A visible person is saying it — the strongest evidence there is.</text>
+  <text class="m" x="646" y="368">frame = visual onset (lips start) · HIGH if mean ≥ 0.7</text>
+  <line class="l" x1="530" y1="340" x2="618" y2="340" marker-end="url(#d)"/>
+  <text class="y" x="556" y="332">yes</text>
+
+  <rect class="bad" x="620" y="396" width="410" height="60" rx="4"/>
+  <text class="badge" x="646" y="420" fill="#B4543F">INVALID — off screen</text>
+  <text class="s" x="646" y="440">Faces are visible and none is speaking: voice-over, phone, out of frame.</text>
+  <path class="l" d="M415,386 L415,426 L618,426" marker-end="url(#d)"/>
+  <text class="n" x="424" y="412">no</text>
+</svg>

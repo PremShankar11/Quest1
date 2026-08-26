@@ -1,15 +1,79 @@
-.superpowers/
-.venv/
+# Python artifacts
 __pycache__/
-*.pyc
+*.py[cod]
+*$py.class
+*.so
 .pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual Environments
+.venv/
+venv/
+env/
+ENV/
+
+# Project Cache & Runtime Output
 cache/
+backend/cache/
 output/
+backend/output/
 bench_out/
+backend/bench_out/
+
+# Video & Audio media files
 *.mp4
+*.mkv
+*.avi
+*.mov
+*.webm
+*.flv
 *.wav
+*.mp3
+*.aac
+*.flac
+*.m4a
+*.words.json
+*.16k.wav
+
+# Image output artifacts
 *.png
+*.jpg
+*.jpeg
+*.webp
+*.gif
+
+# Whitelist documentation images and media assets
 !docs/**/*.png
+!docs/**/*.jpg
+!docs/**/*.jpeg
+!docs/**/*.webp
+!docs/**/*.svg
 !docs/media/*.mp4
+
+# Node / Web artifacts
 node_modules/
 .next/
+dist/
+
+# IDE and Editor configurations
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+*.sublime-project
+*.sublime-workspace
+
+# Operating System files
+.DS_Store
+Thumbs.db
+ehthumbs.db
+desktop.ini
+
+# Agentic / AI scratch & config directories
+.superpowers/
+.agents/
+docs/APPROACH.html

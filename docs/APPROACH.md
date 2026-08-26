@@ -1,4 +1,77 @@
-# Approach
+<div align="center">
+
+# Dialogue Frame Finder — Approach
+
+**How a video URL and one line of dialogue become one exact frame**
+
+</div>
+
+|  |  |
+|---|---|
+| **The task** | Given a video URL and a target dialogue, return the first frame where that dialogue appears — timestamp, frame number, extracted text, frame image. |
+| **What was built** | 4 search modes · web UI + CLI · 151 automated tests · GPU-accelerated with a CPU fallback that never crashes. |
+| **Test video** | *The Adventures of Sherlock Holmes: A Scandal in Bohemia* — 54 min, 23.976 fps, **no burned-in subtitles** (proven in Phase 1, and it changed the whole design). |
+| **Stack** | Python 3.14 · faster-whisper · RapidOCR · LR-ASD + YuNet · FastAPI + SSE · vanilla JS |
+| **Companion docs** | [DECISIONS.md](DECISIONS.md) — every choice and why · [BENCHMARK.md](BENCHMARK.md) — ground-truth accuracy · [prompts.txt](../prompts.txt) — every prompt used |
+
+### The four questions this document answers
+
+| Question | Short answer | Where |
+|---|---|---|
+| **Where do I look?** | Transcribe once, fuzzy-match the line, keep every window scoring ≥ 0.60 — a 54-minute video becomes a handful of seconds. | Phase 2, Phase 3 |
+| **Which frame exactly?** | Binary search on the OCR score (3–4 reads) for on-screen text; the visual speech onset for a speaking face. | Phase 2, Phase 7 |
+| **How is the text extracted?** | RapidOCR on the subtitle band first, full frame if that misses. | Phase 2, Phase 4 |
+| **What about ambiguity?** | Every candidate is classified `valid-text · valid-speaker · uncertain · invalid`, the strongest wins, and the answer states how it was found. | Phase 7 |
+
+### Headline numbers
+
+| Measure | Result |
+|---|---|
+| Automated tests | **151 passing** (144 fast, 7 slow) |
+| Synthetic ground truth | **exact frame** on 7 of 8 variants; worst case 1 frame off (fade-in) |
+| Real episode, `hybrid` | `valid-speaker` · frame 7801 · on-screen speaker confirmed (LR-ASD 0.89) |
+| Trailer title card, `ocr` | `valid-text` · frame 466 · text read as *"MARVEL STUDIOS"* |
+| Voice-over clip | `uncertain` — refuses to claim a visible speaker rather than guessing |
+| Transcription | 141 s CPU → **48.9 s GPU** · one OCR read 598 ms → **~20 ms GPU** |
+
+---
+
+## System at a glance
+
+<p align="center"><img src="media/arch-pipeline.svg" alt="End-to-end architecture" width="100%"></p>
+
+Three ideas carry the whole design:
+
+1. **Audio is the map, not the answer.** Whisper is cheap and tells us *where* to look; it never decides which frame.
+2. **Evidence, not assumption.** Text on the frame and a visibly speaking face are two independent proofs; whichever is present decides the class, and the answer says which one it used.
+3. **Never guess silently.** No usable face is `uncertain`, not `invalid`; a weak match is returned with LOW confidence, labelled — a wrong answer is allowed, a *confident* wrong answer is not.
+
+### The four modes
+
+| Mode | Audio | OCR | Speaker | Best for | Extra install |
+|---|:---:|:---:|:---:|---|---|
+| **`hybrid`** *(default)* | ✅ | ✅ | ✅ | "Is someone visibly saying this?" | `requirements-asd.txt` |
+| **`audio+ocr`** | ✅ | ✅ | — | Burned-in subtitles, dubbed films | — |
+| **`ocr`** | — | ✅ | — | Title cards, signs, silent text | — |
+| **`audio`** | ✅ | — | — | Fastest spoken-word lookup | — |
+
+Without the optional extras `hybrid` does not break: it emits `verify: skipped` and returns the `audio+ocr` answer.
+
+### How the document is organised
+
+| Phase | What it covers |
+|---|---|
+| 1 — Understand | What the real video actually contains (the finding that shaped everything) |
+| 2 — Design | The four evaluation questions, answered as design decisions |
+| 3 — Build | Pipeline, CLI and the audio locator, with measured runs |
+| 4 — Test & measure | Never-crash pass, synthetic ground truth, real-video matrix |
+| 5 — Reflect | Measured limits and what was deliberately left out |
+| 6 — Web UI | FastAPI + SSE, the live page, measured latency |
+| 7 — Visual verification | Active-speaker detection: the `hybrid` mode |
+| 8 — Performance | GPU paths, decoding, single-pass OCR, search order |
+| 9 — Player sync | The embedded player and the iframe reliability fix |
+
+---
 
 ## Phase 1 — Understand the problem
 
@@ -369,6 +442,13 @@ runs is dominated by `whisper base` CPU transcription (60-120 s), not download.
 
 ## Phase 6 — Web UI
 
+<p align="center">
+<img src="media/ui-idle.png" alt="The page before a run" width="49%">
+<img src="media/ui-hybrid-stages.png" alt="Stages and timeline during a run" width="49%">
+</p>
+<p align="center"><sub>Two fields and a button (left); every stage reporting live, with the timeline filling in as the search proceeds (right).</sub></p>
+
+
 FastAPI + one static page, not a framework: the stack review (docs/DECISIONS.md, Phase 1) already
 rejected Next.js/Tailwind/shadcn for this UI — two inputs, one button, a live list, a result card — in
 favour of FastAPI serving `index.html`/`app.js`/`styles.css` with vanilla JS. The one piece that page
@@ -488,6 +568,10 @@ at the frame. Nothing built in Plan 1/2 changes: the old `hybrid` behaviour is r
 `audio+ocr` and stays byte-identical (see Validation table below); `hybrid` becomes the new,
 default, full mode.
 
+### How one window is judged
+
+<p align="center"><img src="media/arch-decision.svg" alt="Decision flow for one candidate window" width="100%"></p>
+
 ### Classification table (spec §3)
 
 | Evidence in the window | Class | Frame | Confidence |
@@ -579,6 +663,12 @@ stays one to two orders of magnitude below a whole-video pass. The earlier "wort
 against real episode-length runs" concern (spike note, `decision`, concern 1) is resolved —
 these are the real episode-length numbers, both before and after the retry fix.
 
+<p align="center">
+<img src="media/ui-hybrid-occurrences.png" alt="Occurrences list with class badges" width="49%">
+<img src="media/ui-hybrid-result.png" alt="Result with the speaking face boxed" width="49%">
+</p>
+<p align="center"><sub>Every candidate window with its scores and verdict (left); the winning frame with the confirmed speaker boxed (right).</sub></p>
+
 ### Validation (real runs, this task)
 
 Run 3 was re-run against commit `2957461` (`fix: hybrid OCR uses the widened-window retry (parity
@@ -640,3 +730,104 @@ python -c "import dialogue_finder.pipeline as p, sys; p.asd_available = lambda *
   callers (unlike Whisper's GPU/CPU fallback in `audio/locator.py`) — a deliberate scope cut
   (spec §9), since `requirements-asd.txt`'s torch wheel is CPU-only on this stack and per-window
   cost is already ~10x under budget without a GPU.
+
+## Phase 8 — Hardware Acceleration, Profiling & Algorithmic Optimizations
+
+<p align="center"><img src="media/arch-speedups.svg" alt="Measured speed-ups" width="100%"></p>
+
+### Full-Pipeline GPU Acceleration Strategy
+
+To scale the pipeline to multi-hour video search, all compute-heavy neural inference stages were augmented with dedicated GPU execution paths while preserving the strict zero-crash CPU fallback contract:
+
+1. **Faster-Whisper on CUDA (`float16`)**:
+   - Integrated `_ensure_cuda_path()` on Windows to dynamically bind `site-packages/nvidia/*/bin` DLL directories into the OS search path before initializing CTranslate2.
+   - On an NVIDIA RTX 3050 Laptop GPU (4 GB VRAM), full-track transcription for the 54-minute Sherlock Holmes episode (`cache/5f39d4605665a831.mp4`) dropped from **2 m 44 s (CPU)** down to **48.9 s (CUDA)** — a **~3.4x speedup**.
+   - If CUDA libraries (`cublas64_12.dll`, `cudnn64_9.dll`) are absent, the loader intercepts `RuntimeError` at first inference and transparently falls back to `device="cpu", compute_type="int8"` without raising exceptions.
+
+2. **RapidOCR on ONNX Runtime GPU (`CUDAExecutionProvider`)**:
+   - Configured `RapidOCR`'s text detection (`ch_PP-OCRv4_det_infer.onnx`), angle classification (`ch_ppocr_mobile_v2.0_cls_infer.onnx`), and text recognition (`ch_PP-OCRv4_rec_infer.onnx`) models with `providers=['CUDAExecutionProvider', 'CPUExecutionProvider']`.
+   - Single-frame OCR inference dropped from **~598 ms on CPU** down to **~18–25 ms on GPU** (a **~25x–30x speedup** per frame).
+
+### Video Ingestion & Sequential Window Buffering
+
+Profiling revealed that standard `cv2.VideoCapture.set(cv2.CAP_PROP_POS_FRAMES, n)` seeking is non-linear and expensive in long, high-bitrate H.264 video streams: seeking to an arbitrary frame requires decoding up to 48 compressed frames from the preceding keyframe (GOP boundary).
+
+- **Sequential Window Decoding**: Rather than issuing discrete seeks for every sample in a candidate window, `frame_source.py` was optimized to stream-decode the candidate temporal window (t_start − 3 s → t_end + 3 s) sequentially into an in-memory frame buffer.
+- **Result**: Frame extraction overhead across a 7-second candidate window dropped by **~80%**, eliminating redundant keyframe decompression.
+
+### Unified Single-Pass OCR Optimization
+
+In the initial Plan 4 implementation, `verify_window` scanned the localized candidate window (3 s padding) and, upon a miss, triggered a separate widened retry (±15 s) at a lower frame rate. This resulted in scanning the same overlapping frames twice (up to 200 OCR model evaluations per window).
+
+- **Unified Pass**: Refactored `backend/dialogue_finder/visual/verifier.py` to evaluate the expanded temporal window in a single unified pass with frame-level memoization.
+- **Latency Impact**: OCR subtitle verification across candidate scenes dropped from **~28.4 s** down to **~1.2–2.5 s** per candidate window on GPU.
+
+### Multi-Candidate Scoring Hierarchy & False-Positive Shielding
+
+When multiple dialogue occurrences exist in a video, naive active-speaker scoring could allow a weak speech match (e.g. ASR ratio 0.65) to override a true dialogue match (ASR ratio 0.97) simply because an active face was detected on camera during the weaker window.
+
+`_select_occurrence` was calibrated with a strict confidence hierarchy:
+1. **High ASR Confidence Priority**: Dialogue matches with ≥ 0.90 ASR similarity form the primary candidate tier.
+2. **Confirmatory Visual Boost**: Active speaker verification (`valid-speaker`) acts as a high-confidence confirmation boost within the top dialogue tier.
+3. **Threshold Guard**: Lower-tier dialogue candidates cannot override top-tier speech candidates regardless of visual speaker activity.
+
+### Directional Early-Exit Search
+
+Optimized search traversal in `pipeline.py` based on the requested occurrence mode:
+- `--occurrence first`: Evaluates candidate windows in chronological order (t₀ → t_end) and short-circuits the pipeline immediately once a candidate crosses the high-confidence threshold (≥ 0.90).
+- `--occurrence last`: Evaluates candidate windows in reverse chronological order (t_end → t₀) with the same early-exit rule.
+- `--occurrence all`: Scans all candidate windows and returns the complete ranked list in `Result.candidates`.
+
+---
+
+## Phase 9 — Interactive Synchronous Video Player & Iframe Reliability
+
+<p align="center"><img src="media/ui-player-sync.png" alt="Embedded player synced to the found timestamp" width="92%"></p>
+<p align="center"><sub>The result is not just a number: the source video is cued to that exact moment, and any candidate card seeks the player to it.</sub></p>
+
+### Interactive Embedded Media Player Architecture
+
+To allow reviewers and users to visually verify dialogue moments immediately without external tools, an interactive media player was integrated directly into the web UI (`frontend/index.html`, `frontend/app.js`, `frontend/styles.css`):
+
+1. **Prominent Layout Placement**: Positioned prominently above the Timeline block so that all pipeline feedback and media playback are visible in the primary viewport.
+2. **Bidirectional Timestamp Synchronization**:
+   - When a search completes, the player automatically cues to the detected dialogue start timestamp and pauses (`autoplay=0`), showing the exact first frame.
+   - When a user clicks any intermediate candidate card, occurrence mark, or previous-frame thumbnail, the player immediately seeks to that timestamp and smoothly scrolls the viewport to the player.
+3. **Multi-Tier Player Engine**:
+   - **YouTube Embed**: Embedded responsive iframe (`https://www.youtube.com/embed/{id}?enablejsapi=1`).
+   - **HTML5 Direct Video**: Native `<video controls>` element for direct MP4/WebM/OGG files and local paths.
+   - **External Provider Fallback**: Clean UI card displaying an external redirect button (`Open Video at Synced Timestamp ↗`) for video providers with strict embedding restrictions.
+
+### Diagnosing & Resolving Iframe Thrashing & Rate-Limiting
+
+During initial testing with live YouTube URLs, the embed player intermittently exhibited unresponsiveness or rendered as a black box with network errors (`net::ERR_CONNECTION_RESET` or Google 401 challenge redirects).
+
+**Root Cause Analysis**:
+1. **Keystroke-Driven Reloads**: The URL input had `input` event listeners that fired on every typed character. Typing a URL character-by-character updated `iframe.src` dozens of times in rapid succession with partial/malformed video IDs, causing YouTube's edge servers to flag the session as abusive and return connection resets.
+2. **Redundant `src` Re-assignment**: Any timestamp change (form submission $\to$ result finish $\to$ candidate click) was setting a new `iframe.src = ...?start={sec}`, destroying the active DOM player instance and forcing a full network reload.
+
+**Architectural Fix**:
+1. **Input Decoupling**: Removed all real-time keystroke listeners. The player is initialized strictly once upon form submission or explicit URL blur.
+2. **Zero-Network `postMessage` Seeking**:
+   ```javascript
+   // Only reload the iframe if the VIDEO ID changes
+   if (ytIframe.dataset.videoId !== ytId) {
+     ytIframe.dataset.videoId = ytId;
+     ytIframe.src = `https://www.youtube.com/embed/${ytId}?start=${startSec}&autoplay=0&rel=0&enablejsapi=1`;
+   } else if (ytIframe.contentWindow) {
+     // Same video, different timestamp: seek instantly with zero network requests
+     ytIframe.contentWindow.postMessage(JSON.stringify({
+       event: "command",
+       func: "seekTo",
+       args: [timestamp_s, true]
+     }), "*");
+     ytIframe.contentWindow.postMessage(JSON.stringify({
+       event: "command",
+       func: "pauseVideo",
+       args: []
+     }), "*");
+   }
+   ```
+3. **Multi-Layer Fallback UI**:
+   - Stacked a high-resolution video thumbnail (`https://img.youtube.com/vi/{id}/hqdefault.jpg`, served from YouTube's highly available image CDN) and a centered play button (`▶`) on z-index 1 and $2$ directly behind the iframe (z-index 3).
+   - If third-party iframe embedding is blocked by client-side ad-blockers, network policies, or regional restrictions, the player gracefully shows the video thumbnail with a clickable link that opens the video at the exact synced timestamp in a new tab.
