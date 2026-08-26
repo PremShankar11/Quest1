@@ -31,6 +31,11 @@ def index() -> FileResponse:
     return FileResponse(FRONTEND / "index.html", headers={"Cache-Control": "no-cache, no-store, must-revalidate"})
 
 
+@app.get("/favicon.ico", include_in_schema=False)
+def favicon() -> Response:
+    return Response(status_code=204)
+
+
 @app.post("/jobs")
 def create_job(req: JobRequest) -> dict:
     return {"id": store.create(req).id}
