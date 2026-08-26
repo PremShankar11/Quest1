@@ -121,7 +121,7 @@ function initYouTubeApi() {
 }
 initYouTubeApi();
 
-function syncVideoPlayer(url, timestamp_s = 0, shouldScroll = false) {
+function syncVideoPlayer(url, timestamp_s = 0, shouldScroll = false, autoplay = false) {
   if (!url) return;
   const playerBlock = $("player-block");
   if (!playerBlock) return;
@@ -144,9 +144,10 @@ function syncVideoPlayer(url, timestamp_s = 0, shouldScroll = false) {
     html5Player.hidden = true;
     fallbackPlayer.hidden = true;
 
-    const ytEmbedUrl = `https://www.youtube.com/embed/${ytId}?start=${startSec}&autoplay=0&rel=0&enablejsapi=1`;
+    const autoplayParam = autoplay ? 1 : 0;
+    const ytEmbedUrl = `https://www.youtube.com/embed/${ytId}?start=${startSec}&autoplay=${autoplayParam}&rel=0&enablejsapi=1`;
     if (ytIframe) {
-      if (ytIframe.dataset.videoId !== ytId || ytIframe.dataset.startSec != startSec) {
+      if (ytIframe.dataset.videoId !== ytId || ytIframe.dataset.startSec != startSec || autoplay) {
         ytIframe.dataset.videoId = ytId;
         ytIframe.dataset.startSec = startSec;
         ytIframe.src = ytEmbedUrl;
@@ -154,7 +155,11 @@ function syncVideoPlayer(url, timestamp_s = 0, shouldScroll = false) {
       if (ytIframe.contentWindow) {
         try {
           ytIframe.contentWindow.postMessage(JSON.stringify({ event: "command", func: "seekTo", args: [timestamp_s, true] }), "*");
-          ytIframe.contentWindow.postMessage(JSON.stringify({ event: "command", func: "pauseVideo", args: [] }), "*");
+          if (autoplay) {
+            ytIframe.contentWindow.postMessage(JSON.stringify({ event: "command", func: "playVideo", args: [] }), "*");
+          } else {
+            ytIframe.contentWindow.postMessage(JSON.stringify({ event: "command", func: "pauseVideo", args: [] }), "*");
+          }
         } catch {}
       }
     }
@@ -175,7 +180,11 @@ function syncVideoPlayer(url, timestamp_s = 0, shouldScroll = false) {
       html5Player.src = url;
     }
     html5Player.currentTime = timestamp_s;
-    html5Player.pause();
+    if (autoplay) {
+      html5Player.play().catch(() => {});
+    } else {
+      html5Player.pause();
+    }
 
     if (directLink) {
       directLink.href = url;
@@ -215,9 +224,9 @@ function renderOccurrences(occurrences) {
     const speakMark = speakMarkFor(occ.klass);
     const li = document.createElement("li");
     li.className = "occ-row"; li.dataset.klass = occ.klass;
-    li.title = "Click to jump video to this scene";
+    li.title = "Click to jump and play video at this scene";
     li.addEventListener("click", () => {
-      syncVideoPlayer($("url").value.trim(), w.start_s, true);
+      syncVideoPlayer($("url").value.trim(), w.start_s, true, true);
     });
 
     const main = document.createElement("span");
@@ -252,10 +261,10 @@ function addCandidate(frame, score, text, timestamp_s) {
   const timeLabel = timestamp_s !== undefined ? tc(timestamp_s) : (fps ? tc(frame / fps) : "");
   const timePrefix = timeLabel ? `${timeLabel} · ` : "";
   d.innerHTML = `<img src="/jobs/${jobId}/frames/${frame}.png?w=320" alt="frame ${frame}" loading="lazy"><figcaption class="mono">${timePrefix}${frame} · ${score.toFixed(2)}</figcaption>`;
-  d.title = text ? `${text} (Click to jump video)` : "Click to jump video";
+  d.title = text ? `${text} (Click to jump and play video)` : "Click to jump and play video";
   d.addEventListener("click", () => {
     const t = timestamp_s !== undefined ? timestamp_s : (fps ? frame / fps : 0);
-    syncVideoPlayer($("url").value.trim(), t, true);
+    syncVideoPlayer($("url").value.trim(), t, true, true);
   });
   $("filmstrip").appendChild(d);
 }
@@ -300,18 +309,18 @@ async function finish(st, msg, payload) {
 
   // Make result and previous frame clickable to jump video
   $("r-tc").style.cursor = "pointer";
-  $("r-tc").title = "Click to jump video to this result";
-  $("r-tc").onclick = () => syncVideoPlayer($("url").value.trim(), r.timestamp_s, true);
+  $("r-tc").title = "Click to jump and play video at this result";
+  $("r-tc").onclick = () => syncVideoPlayer($("url").value.trim(), r.timestamp_s, true, true);
 
   $("r-img").style.cursor = "pointer";
-  $("r-img").title = "Click to jump video to this result";
-  $("r-img").onclick = () => syncVideoPlayer($("url").value.trim(), r.timestamp_s, true);
+  $("r-img").title = "Click to jump and play video at this result";
+  $("r-img").onclick = () => syncVideoPlayer($("url").value.trim(), r.timestamp_s, true, true);
 
   if (r.frame_index > 0) {
     const prevTime = fps ? Math.max(0, (r.frame_index - 1) / fps) : Math.max(0, r.timestamp_s - 0.033);
     $("r-prev").style.cursor = "pointer";
-    $("r-prev").title = "Click to jump video to this frame before";
-    $("r-prev").onclick = () => syncVideoPlayer($("url").value.trim(), prevTime, true);
+    $("r-prev").title = "Click to jump and play video at this frame before";
+    $("r-prev").onclick = () => syncVideoPlayer($("url").value.trim(), prevTime, true, true);
   }
 
   syncVideoPlayer($("url").value.trim(), r.timestamp_s, false);
