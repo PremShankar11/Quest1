@@ -10,5 +10,6 @@ bench_out/
 *.wav
 *.png
 !docs/**/*.png
+!docs/media/*.mp4
 node_modules/
 .next/
