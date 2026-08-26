@@ -129,14 +129,13 @@ function syncVideoPlayer(url, timestamp_s = 0, shouldScroll = false) {
     const watchUrl = `https://www.youtube.com/watch?v=${ytId}&t=${startSec}s`;
     if (ytPlayBtn) ytPlayBtn.href = watchUrl;
 
-    const ytEmbedUrl = `https://www.youtube.com/embed/${ytId}?start=${startSec}&autoplay=0&rel=0&enablejsapi=1`;
     if (ytIframe) {
-      if (ytIframe.dataset.videoId !== ytId || ytIframe.dataset.startSec != startSec) {
+      // Only reload the iframe if the VIDEO changes — never for timestamp changes
+      if (ytIframe.dataset.videoId !== ytId) {
         ytIframe.dataset.videoId = ytId;
-        ytIframe.dataset.startSec = startSec;
-        ytIframe.src = ytEmbedUrl;
-      }
-      if (ytIframe.contentWindow) {
+        ytIframe.src = `https://www.youtube.com/embed/${ytId}?start=${startSec}&autoplay=0&rel=0&enablejsapi=1`;
+      } else if (ytIframe.contentWindow) {
+        // Same video, different timestamp — just seek (no network request)
         try {
           ytIframe.contentWindow.postMessage(JSON.stringify({ event: "command", func: "seekTo", args: [timestamp_s, true] }), "*");
           ytIframe.contentWindow.postMessage(JSON.stringify({ event: "command", func: "pauseVideo", args: [] }), "*");
