@@ -32,7 +32,8 @@ def index() -> FileResponse:
 
 
 @app.get("/favicon.ico", include_in_schema=False)
-def favicon() -> Response:
+@app.get("/.well-known/{rest:path}", include_in_schema=False)
+def browser_probes() -> Response:
     return Response(status_code=204)
 
 
