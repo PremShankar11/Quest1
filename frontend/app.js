@@ -76,16 +76,21 @@ function parseYouTubeId(raw) {
   try {
     const url = new URL(s.startsWith("http") ? s : `https://${s}`);
     if (url.hostname.includes("youtube.com")) {
-      if (url.searchParams.has("v")) return url.searchParams.get("v");
+      if (url.searchParams.has("v")) {
+        const id = url.searchParams.get("v");
+        if (id && id.length >= 11) return id.slice(0, 11);
+      }
       const parts = url.pathname.split("/").filter(Boolean);
-      if (parts[0] === "embed" || parts[0] === "v" || parts[0] === "shorts") return parts[1];
+      if (parts[0] === "embed" || parts[0] === "v" || parts[0] === "shorts") {
+        if (parts[1] && parts[1].length >= 11) return parts[1].slice(0, 11);
+      }
     }
     if (url.hostname.includes("youtu.be")) {
       const parts = url.pathname.split("/").filter(Boolean);
-      return parts[0] || null;
+      if (parts[0] && parts[0].length >= 11) return parts[0].slice(0, 11);
     }
   } catch {}
-  const m = s.match(/(?:youtu\.be\/|youtube\.com\/(?:watch\?.*v=|embed\/|v\/|shorts\/))([\w-]{11})/);
+  const m = s.match(/(?:youtu\.be\/|youtube\.com\/(?:watch\?.*v=|embed\/|v\/|shorts\/))([a-zA-Z0-9_-]{11})/);
   return m ? m[1] : null;
 }
 
