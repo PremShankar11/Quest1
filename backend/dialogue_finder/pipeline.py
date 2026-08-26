@@ -181,8 +181,9 @@ def _run_hybrid(src: FrameSource, video: Path, windows: list[Window], target: st
     detector = YuNetDetector(cfg.models_dir)
     speaker = LrAsdDetector(cfg.models_dir)
 
+    windows_to_scan = sorted(windows, key=lambda w: w.start_s, reverse=True) if occurrence == "last" else windows
     occurrences: list[Occurrence] = []
-    for i, window in enumerate(windows):
+    for i, window in enumerate(windows_to_scan):
         _check_cancel(should_cancel)
         reporter.emit(StageEvent("verify", "running", f"window {i}: {window.start_s:.1f}-{window.end_s:.1f}s",
                                  payload={"window_index": i}))
@@ -190,8 +191,8 @@ def _run_hybrid(src: FrameSource, video: Path, windows: list[Window], target: st
         occurrences.append(occ)
         reporter.emit(StageEvent("verify", "ok", f"window {i}: {occ.klass}",
                                  payload={"window_index": i, "faces": occ.faces, "asd_mean": occ.asd_mean}))
-        if occurrence == "first" and occ.klass in ("valid-text", "valid-speaker") and occ.window.score >= 0.85:
-            if not any(w.score > occ.window.score for w in windows[i + 1:]):
+        if occurrence in ("first", "last") and occ.klass in ("valid-text", "valid-speaker") and occ.window.score >= 0.85:
+            if not any(w.score > occ.window.score for w in windows_to_scan[i + 1:]):
                 break
     timings["verify"] = time.perf_counter() - t2
 
