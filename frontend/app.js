@@ -68,8 +68,7 @@ function speakMarkFor(klass) {
   return "?";
 }
 
-let ytPlayer = null, ytReady = false, pendingVideoSync = null, currentVideoUrl = "";
-
+// YouTube URL parsing
 function parseYouTubeId(raw) {
   if (!raw) return null;
   const s = raw.trim();
@@ -98,28 +97,6 @@ function isDirectVideo(url) {
   if (!url) return false;
   return /\.(mp4|webm|ogg|m4v|mov)(\?.*)?$/i.test(url) || url.startsWith("blob:") || url.startsWith("data:") || url.startsWith("file://") || /^[A-Za-z]:[\\\/]/.test(url);
 }
-
-function initYouTubeApi() {
-  if (window.YT && window.YT.Player) {
-    ytReady = true; return;
-  }
-  const tag = document.createElement("script");
-  tag.src = "https://www.youtube.com/iframe_api";
-  const firstScriptTag = document.getElementsByTagName("script")[0];
-  if (firstScriptTag && firstScriptTag.parentNode) {
-    firstScriptTag.parentNode.insertBefore(tag, firstScriptTag);
-  } else {
-    document.head.appendChild(tag);
-  }
-  window.onYouTubeIframeAPIReady = () => {
-    ytReady = true;
-    if (pendingVideoSync) {
-      syncVideoPlayer(pendingVideoSync.url, pendingVideoSync.timestamp_s);
-      pendingVideoSync = null;
-    }
-  };
-}
-initYouTubeApi();
 
 function syncVideoPlayer(url, timestamp_s = 0, shouldScroll = false) {
   if (!url) return;
@@ -326,37 +303,10 @@ async function finish(st, msg, payload) {
 
 function escapeHtml(s) { return s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
 
-// Debounce helper: only call fn after the user stops for `delay` ms
-let _urlDebounceTimer = null;
-function debouncedSync(delay = 800) {
-  clearTimeout(_urlDebounceTimer);
-  _urlDebounceTimer = setTimeout(() => {
-    const u = $("url").value.trim();
-    if (u && parseYouTubeId(u)) syncVideoPlayer(u, 0, false);
-  }, delay);
-}
-
-// On paste: load player immediately (user pasted a full URL)
-$("url").addEventListener("paste", () => {
-  setTimeout(() => {
-    const u = $("url").value.trim();
-    if (u) syncVideoPlayer(u, 0, false);
-  }, 50);
-});
-
-// On blur/change: load player when user leaves the field
-$("url").addEventListener("change", () => {
-  const u = $("url").value.trim();
-  if (u) syncVideoPlayer(u, 0, false);
-});
-
-// On typing: debounced — only load after 800ms of no keystrokes
-$("url").addEventListener("input", () => debouncedSync(800));
-
 form.addEventListener("submit", async (e) => {
   e.preventDefault(); reset();
-  clearTimeout(_urlDebounceTimer);
   const inputUrl = $("url").value.trim();
+  // Load video player only when user presses Find frame
   syncVideoPlayer(inputUrl, 0, false);
   $("go").disabled = true; $("go").textContent = "Finding…"; setState("running", "running");
   const body = { url: inputUrl, text: $("text").value.trim(), mode: $("mode").value, occurrence: $("occurrence").value };
@@ -368,10 +318,3 @@ form.addEventListener("submit", async (e) => {
   es.onerror = () => { if (es && es.readyState === EventSource.CLOSED) showError("Lost the connection to the server. Restart it and try again."); };
 });
 $("cancel").addEventListener("click", () => jobId && fetch(`/jobs/${jobId}/cancel`, { method: "POST" }));
-
-// Load initial video preview if URL field has initial value (e.g. browser autofill)
-const initialUrl = $("url") ? $("url").value.trim() : "";
-if (initialUrl) {
-  syncVideoPlayer(initialUrl, 0, false);
-}
-
