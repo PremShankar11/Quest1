@@ -17,9 +17,10 @@ import markdown
 
 ROOT = Path(__file__).resolve().parents[1]
 DOCS = ROOT / "docs"
-MD = DOCS / "APPROACH.md"
-HTML = DOCS / "APPROACH.html"
-PDF = DOCS / "APPROACH.pdf"
+MD = Path(sys.argv[1]).resolve() if len(sys.argv) > 1 else DOCS / "APPROACH.md"
+HTML = MD.with_suffix(".html")
+PDF = MD.with_suffix(".pdf")
+IS_FINAL = MD.stem.lower().startswith("approach_final")
 
 CHROME_CANDIDATES = [
     Path(r"C:\Program Files\Google\Chrome\Application\chrome.exe"),
@@ -63,9 +64,9 @@ body {
 .cover .meta { font-family: Consolas, monospace; font-size: 9.5pt; color: #5D636D; line-height: 2; }
 h1, h2, h3, h4 { font-weight: 650; color: #12151A; page-break-after: avoid; }
 h1 { font-size: 20pt; margin: 0 0 6mm; }
-h2 { font-size: 15pt; margin: 0 0 5mm; padding-top: 4mm; border-top: 2px solid #0E7C7B;
-     page-break-before: always; }
-h2:first-of-type { page-break-before: avoid; }
+h2 { font-size: 15pt; margin: 8mm 0 4mm; padding-top: 3mm; border-top: 2px solid #0E7C7B; }
+h2.newpage { page-break-before: always; }
+h2:first-of-type { page-break-before: avoid; margin-top: 0; }
 h3 { font-size: 12pt; margin: 7mm 0 2.5mm; color: #0E7C7B; }
 h4 { font-size: 10.5pt; margin: 5mm 0 2mm; }
 p { margin: 0 0 3.2mm; }
@@ -94,19 +95,31 @@ hr { border: 0; border-top: 1px solid #E2DED4; margin: 6mm 0; }
 div[align="center"] h1 { text-align: center; }
 """
 
-COVER = """
+COVER_TEMPLATE = """
 <div class="cover">
-  <div class="eyebrow">Technical Approach</div>
+  <div class="eyebrow">{eyebrow}</div>
   <h1>Dialogue&nbsp;Frame&nbsp;Finder</h1>
   <div class="sub">How a video URL and one line of dialogue<br>become one exact frame</div>
   <div class="rule"></div>
   <div class="meta">
-    4 search modes &nbsp;·&nbsp; 151 automated tests<br>
-    audio + on-screen text + active-speaker verification<br>
-    GPU-accelerated, CPU-safe, runs entirely offline
+    {meta}
   </div>
 </div>
 """
+
+
+def cover() -> str:
+    if IS_FINAL:
+        return COVER_TEMPLATE.format(
+            eyebrow="Technical Approach",
+            meta=("audio + on-screen text + active-speaker verification<br>"
+                  "4 search modes &nbsp;·&nbsp; 151 automated tests<br>"
+                  "GPU-accelerated, CPU-safe, runs entirely offline"))
+    return COVER_TEMPLATE.format(
+        eyebrow="Engineering Log",
+        meta=("phase-by-phase build record<br>"
+              "measurements, validation runs and investigations<br>"
+              "companion to approach_final.md"))
 
 
 def build_html(md_text: str) -> str:
@@ -117,11 +130,13 @@ def build_html(md_text: str) -> str:
         extensions=["tables", "fenced_code", "attr_list", "sane_lists", "md_in_html"],
         output_format="html5",
     )
+    if not IS_FINAL:      # the long engineering log reads better one phase per page
+        body = re.sub(r"<h2([ >])", r'<h2 class="newpage"', body)
     return (
         "<!doctype html><html lang='en'><head><meta charset='utf-8'>"
         f"<base href='{DOCS.as_uri()}/'>"
         "<title>Dialogue Frame Finder — Approach</title>"
-        f"<style>{CSS}</style></head><body>{COVER}{body}</body></html>"
+        f"<style>{CSS}</style></head><body>{cover()}{body}</body></html>"
     )
 
 

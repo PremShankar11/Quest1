@@ -283,7 +283,8 @@ cd backend && ..\.venv\Scripts\python -m pytest -q
 
 | Document | What's inside |
 |---|---|
-| [`docs/APPROACH.md`](docs/APPROACH.md) | The phased build: problem → design → measurements → validation → limits |
+| [`docs/approach_final.md`](docs/approach_final.md) · [PDF](docs/approach_final.pdf) | **Start here** — the technical approach: problem, architecture, evidence model, exact-frame selection, validation, limitations |
+| [`docs/APPROACH.md`](docs/APPROACH.md) · [PDF](docs/APPROACH.pdf) | The full engineering log: every phase, measurement and investigation |
 | [`docs/DECISIONS.md`](docs/DECISIONS.md) | Every decision and why, including the ones I overruled |
 | [`docs/BENCHMARK.md`](docs/BENCHMARK.md) | Ground-truth accuracy across fonts, positions, fades, resolutions, frame rates |
 | [`prompts.txt`](prompts.txt) | Every prompt used to build this, verbatim |

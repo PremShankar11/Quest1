@@ -1,0 +1,575 @@
+<!doctype html><html lang='en'><head><meta charset='utf-8'><base href='file:///C:/Users/Asus/Quest1/docs/'><title>Dialogue Frame Finder — Approach</title><style>
+@page { size: A4; margin: 16mm 14mm 16mm 14mm; }
+* { box-sizing: border-box; }
+body {
+  font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+  font-size: 10.5pt; line-height: 1.55; color: #1B1E23; margin: 0;
+  -webkit-print-color-adjust: exact; print-color-adjust: exact;
+}
+.cover { height: 252mm; display: flex; flex-direction: column; justify-content: center; text-align: center;
+         page-break-after: always; }
+.cover .eyebrow { font-family: Consolas, monospace; font-size: 10pt; letter-spacing: .22em;
+                  text-transform: uppercase; color: #0E7C7B; margin-bottom: 14mm; }
+.cover h1 { font-size: 30pt; line-height: 1.15; margin: 0 0 6mm; letter-spacing: -.01em; border: 0; }
+.cover .sub { font-size: 13pt; color: #5D636D; margin-bottom: 16mm; }
+.cover .rule { width: 42mm; height: 3px; background: #B7791F; margin: 0 auto 16mm; }
+.cover .meta { font-family: Consolas, monospace; font-size: 9.5pt; color: #5D636D; line-height: 2; }
+h1, h2, h3, h4 { font-weight: 650; color: #12151A; page-break-after: avoid; }
+h1 { font-size: 20pt; margin: 0 0 6mm; }
+h2 { font-size: 15pt; margin: 8mm 0 4mm; padding-top: 3mm; border-top: 2px solid #0E7C7B; }
+h2.newpage { page-break-before: always; }
+h2:first-of-type { page-break-before: avoid; margin-top: 0; }
+h3 { font-size: 12pt; margin: 7mm 0 2.5mm; color: #0E7C7B; }
+h4 { font-size: 10.5pt; margin: 5mm 0 2mm; }
+p { margin: 0 0 3.2mm; }
+ul, ol { margin: 0 0 3.5mm; padding-left: 6mm; }
+li { margin-bottom: 1.4mm; }
+strong { color: #12151A; }
+a { color: #0E7C7B; text-decoration: none; }
+code { font-family: Consolas, monospace; font-size: 9pt; background: #F1EFE9; padding: 0.3mm 1.1mm;
+       border-radius: 2px; color: #2A2F38; }
+pre { background: #F7F6F2; border: 1px solid #E2DED4; border-left: 3px solid #0E7C7B; border-radius: 3px;
+      padding: 3mm 4mm; overflow: hidden; page-break-inside: avoid; margin: 0 0 4mm; }
+pre code { background: none; padding: 0; font-size: 8.4pt; line-height: 1.45; white-space: pre-wrap;
+           word-break: break-word; }
+blockquote { margin: 0 0 4mm; padding: 2mm 4mm; border-left: 3px solid #B7791F; background: #FDF8EE;
+             color: #4A5058; }
+table { width: 100%; border-collapse: collapse; margin: 0 0 5mm; font-size: 8.8pt;
+        page-break-inside: avoid; }
+th { background: #E9F6F5; color: #12151A; text-align: left; font-weight: 650; }
+th, td { border: 1px solid #DCD8CE; padding: 1.8mm 2.4mm; vertical-align: top; }
+tbody tr:nth-child(even) { background: #FAF9F6; }
+td code { font-size: 8pt; }
+img, svg { max-width: 100%; height: auto; page-break-inside: avoid; }
+p:has(img) { text-align: center; margin: 4mm 0 3mm; }
+sub { color: #6C727B; font-size: 8.6pt; }
+hr { border: 0; border-top: 1px solid #E2DED4; margin: 6mm 0; }
+div[align="center"] h1 { text-align: center; }
+</style></head><body>
+<div class="cover">
+  <div class="eyebrow">Technical Approach</div>
+  <h1>Dialogue&nbsp;Frame&nbsp;Finder</h1>
+  <div class="sub">How a video URL and one line of dialogue<br>become one exact frame</div>
+  <div class="rule"></div>
+  <div class="meta">
+    audio + on-screen text + active-speaker verification<br>4 search modes &nbsp;·&nbsp; 151 automated tests<br>GPU-accelerated, CPU-safe, runs entirely offline
+  </div>
+</div>
+<table>
+<thead>
+<tr>
+<th></th>
+<th></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Input</strong></td>
+<td>A video URL (or local file) and a target line of dialogue</td>
+</tr>
+<tr>
+<td><strong>Output</strong></td>
+<td>The first frame where that dialogue appears — timestamp, frame number, extracted text, frame image</td>
+</tr>
+<tr>
+<td><strong>Interfaces</strong></td>
+<td>Web page (live progress + synced player) and CLI, over one shared pipeline</td>
+</tr>
+<tr>
+<td><strong>Scale of the problem</strong></td>
+<td>54-minute test video · 78 204 frames · one OCR read costs ~0.6 s on CPU — reading every frame is never an option</td>
+</tr>
+<tr>
+<td><strong>Supporting docs</strong></td>
+<td><a href="DECISIONS.md">DECISIONS.md</a> — decision log · <a href="BENCHMARK.md">BENCHMARK.md</a> — ground-truth accuracy · <a href="APPROACH.md">APPROACH.md</a> — full engineering log · <a href="../prompts.txt">prompts.txt</a></td>
+</tr>
+</tbody>
+</table>
+<hr>
+<h2>1. Problem</h2>
+<p>Given a video URL and a line of dialogue, return the <strong>first frame in which that dialogue appears</strong>, together with its timestamp, frame number and the text extracted from the frame. The phrase "appears" is ambiguous on purpose: a line can appear as <strong>burned-in text</strong> on screen, or it can be <strong>spoken by a person</strong> who may or may not be visible. A design that assumes only one of those readings fails on the other half of real footage — the test video supplied with the brief turned out to have <strong>no burned-in subtitles at all</strong>, while the trailers used for cross-validation carry both hard-coded captions and off-screen narration.</p>
+<p>The system therefore has to decide, per video and per occurrence, <em>which kind of appearance it is looking at</em> — and say so in the answer rather than silently picking one interpretation.</p>
+<hr>
+<h2>2. Solution at a glance</h2>
+<p align="center"><img src="media/arch-pipeline.svg" alt="End-to-end architecture" width="100%"></p>
+
+<table>
+<thead>
+<tr>
+<th>Component</th>
+<th>Role</th>
+<th>Technology</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Fetch</strong></td>
+<td>Turn a URL into a local file, cached by URL hash</td>
+<td>yt-dlp + static-ffmpeg</td>
+</tr>
+<tr>
+<td><strong>ASR</strong></td>
+<td>Transcribe once with word-level timestamps; find <em>where</em> the line is spoken</td>
+<td>faster-whisper (<code>base</code>, <code>task=translate</code>)</td>
+</tr>
+<tr>
+<td><strong>Candidate windows</strong></td>
+<td>Every non-overlapping transcript span scoring ≥ 0.60, capped at 5, padded ±3 s</td>
+<td>rapidfuzz (<code>token_sort_ratio</code>)</td>
+</tr>
+<tr>
+<td><strong>OCR</strong></td>
+<td>Inside a window, read the subtitle band; full frame if the band is empty</td>
+<td>RapidOCR (ONNX Runtime)</td>
+</tr>
+<tr>
+<td><strong>Face tracking</strong></td>
+<td>Detect and track faces across the window; discard tracks &lt; 0.5 s or &lt; 40 px</td>
+<td>OpenCV YuNet + IoU tracker</td>
+</tr>
+<tr>
+<td><strong>Active-speaker detection</strong></td>
+<td>Score each face track per frame: is <em>this</em> person speaking now?</td>
+<td>LR-ASD (0.84 M params, MIT) + Silero VAD</td>
+</tr>
+<tr>
+<td><strong>Verification</strong></td>
+<td>Classify each occurrence and select the strongest</td>
+<td><code>visual/verifier.py</code></td>
+</tr>
+<tr>
+<td><strong>Exact frame</strong></td>
+<td>Binary search on OCR score, or the visual speech onset</td>
+<td><code>text/refiner.py</code>, <code>visual/verifier.py</code></td>
+</tr>
+<tr>
+<td><strong>Delivery</strong></td>
+<td>Live stage events, timeline, candidate strip, result with evidence pair</td>
+<td>FastAPI + SSE, vanilla JS</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Four modes</strong> expose the pipeline at different depths — the mode is a user choice, not an internal branch:</p>
+<table>
+<thead>
+<tr>
+<th>Mode</th>
+<th style="text-align: center;">ASR</th>
+<th style="text-align: center;">OCR</th>
+<th style="text-align: center;">Speaker</th>
+<th>Use it when</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>hybrid</code> <em>(default)</em></td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">✅</td>
+<td>You need to know whether a visible person actually says the line</td>
+</tr>
+<tr>
+<td><code>audio+ocr</code></td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">—</td>
+<td>Burned-in subtitles, dubbed film, no interest in who is on screen</td>
+</tr>
+<tr>
+<td><code>ocr</code></td>
+<td style="text-align: center;">—</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">—</td>
+<td>Title cards, signage, text with no speech at all</td>
+</tr>
+<tr>
+<td><code>audio</code></td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">—</td>
+<td style="text-align: center;">—</td>
+<td>Fastest lookup; the spoken moment is enough</td>
+</tr>
+</tbody>
+</table>
+<hr>
+<h2>3. Core approach</h2>
+<p>Three independent evidence sources, deliberately kept separate so that each one can be trusted, tested and explained on its own.</p>
+<table>
+<thead>
+<tr>
+<th>Evidence</th>
+<th>Question it answers</th>
+<th>What it cannot do</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>ASR</strong> (Whisper)</td>
+<td><em>When</em> is the line spoken?</td>
+<td>Cannot tell whether anything is visible on screen; word timestamps drift by ~0.1-0.2 s</td>
+</tr>
+<tr>
+<td><strong>OCR</strong> (RapidOCR)</td>
+<td>Is the line <em>written</em> in the frame, and what exactly does it say?</td>
+<td>Cannot find a line that is spoken but never written</td>
+</tr>
+<tr>
+<td><strong>Active-speaker detection</strong> (LR-ASD)</td>
+<td>Is a <em>visible person</em> saying it right now?</td>
+<td>Cannot read text; needs a usable, roughly frontal face</td>
+</tr>
+</tbody>
+</table>
+<h3>Three principles that shaped the design</h3>
+<ol>
+<li><strong>Audio is the map, not the answer.</strong> Transcription is cheap and global; OCR and ASD are expensive and local. ASR runs once over the whole video to produce candidate windows, and then never decides a frame. This is what turns a 78 204-frame problem into a few hundred frames of real work.</li>
+<li><strong>Evidence, not assumption.</strong> On-screen text and a visibly speaking face are two independent proofs. Whichever is present decides the classification, and the result always names the evidence it used (<code>source: ocr</code> / <code>audio+asd</code> / <code>audio</code>).</li>
+<li><strong>Never guess silently.</strong> A weak match is returned with LOW confidence and labelled; an absent face is <code>uncertain</code>, never <code>invalid</code>; a failure produces a one-line message, never a traceback. A wrong answer is acceptable; a <em>confident</em> wrong answer is not.</li>
+</ol>
+<h3>How the signals combine</h3>
+<p>Each candidate window is verified independently and receives one verdict:</p>
+<p align="center"><img src="media/arch-decision.svg" alt="Decision flow for one candidate window" width="100%"></p>
+
+<table>
+<thead>
+<tr>
+<th>Evidence in the window</th>
+<th>Class</th>
+<th>Frame chosen</th>
+<th>Confidence</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>OCR score ≥ 0.80</td>
+<td><strong><code>valid-text</code></strong></td>
+<td>Binary-search first frame showing the text</td>
+<td>HIGH ≥ 0.9, else MEDIUM</td>
+</tr>
+<tr>
+<td>No OCR; a usable track scores ≥ 0.50 on ≥ 30 % of the window's speech frames</td>
+<td><strong><code>valid-speaker</code></strong></td>
+<td>Visual speech onset</td>
+<td>HIGH if mean ≥ 0.7, else MEDIUM</td>
+</tr>
+<tr>
+<td>No OCR; usable faces exist, none qualifies</td>
+<td><strong><code>invalid</code></strong> (off-screen)</td>
+<td>First spoken word</td>
+<td>LOW</td>
+</tr>
+<tr>
+<td>No OCR; no usable face (none found, too small/short, or ASD unavailable)</td>
+<td><strong><code>uncertain</code></strong></td>
+<td>First spoken word</td>
+<td>MEDIUM</td>
+</tr>
+</tbody>
+</table>
+<p>Across windows the selection is: <strong>class strength first</strong> (<code>valid</code> &gt; <code>uncertain</code> &gt; <code>invalid</code>), then ASR similarity, then earliest in time. <code>--occurrence first|last|all</code> operates within the winning class.</p>
+<blockquote>
+<p><strong>Why <code>uncertain</code> exists.</strong> A person can be on screen with their back to the camera, in shadow, or at the edge of frame. Treating "no usable face" as "not speaking" would confidently mislabel those scenes. <code>invalid</code> is only claimed when the system has actually seen qualifying faces and confirmed none of them is talking — a distinction that costs one branch and buys honesty.</p>
+</blockquote>
+<hr>
+<h2>4. Exact-frame selection</h2>
+<p>Finding the <em>right second</em> is not the same as finding the <em>right frame</em>. Two different mechanisms, each matched to its evidence:</p>
+<h3>Text on screen → binary search on the OCR score</h3>
+<p>The coarse scan samples the window at 5 fps, so a hit means "somewhere in the last 200 ms the text appeared". Between the last non-matching sample and the first matching one, the refiner binary-searches on the OCR score: <strong>3-4 OCR reads instead of a linear walk of ~5 frames</strong>, and the same code answers correctly whether the sampling step is 5 or 50 frames.</p>
+<p>A guard covers the case where the text was <em>already</em> on screen at the start of the scan region: the refiner walks backwards up to 8 samples, and if the text still hasn't disappeared it returns the earliest confirmed frame with <code>exact = False</code>, a note, and a downgraded confidence — rather than reporting a boundary it never actually observed.</p>
+<h3>A visible speaker → visual speech onset</h3>
+<p>For <code>valid-speaker</code>, the frame is the moment the person <em>starts</em> speaking on camera: the first frame where the chosen track's ASD score crosses 0.50 for <strong>3 consecutive frames</strong> while the audio VAD says speech is present, searched from 1 s before the window start. If a cut drops the camera onto the speaker mid-line and no such run exists, the result falls back to the first-spoken-word frame with the note <code>speaker visible; onset not observed (cut)</code>.</p>
+<p>On the test episode the two answers differ exactly as expected: audio alone puts the line at frame <strong>7794</strong>, the visual onset at frame <strong>7801</strong> — 7 frames (≈0.29 s) later, because lips begin moving after the transcriber's word boundary.</p>
+<h3>Fades and other ambiguity</h3>
+<p>Text that fades in has no single "first" frame. The system reports the first frame that crosses the OCR threshold and labels the transition <code>fade-in</code> vs <code>pop-in</code> (measured by edge-density change between frame <em>n−1</em> and <em>n</em>); the synthetic benchmark shows this costs <strong>1 frame</strong> of accuracy on a 12-frame fade and 0 frames on hard cuts. Every result ships with the previous frame alongside the chosen one, so the boundary is visible in two seconds rather than taken on trust.</p>
+<hr>
+<h2>5. Key design decisions</h2>
+<table>
+<thead>
+<tr>
+<th>Decision</th>
+<th>Reasoning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>ASR narrows the search; it never picks the frame</strong></td>
+<td>A blind OCR scan of the 54-minute episode is ~6 500 reads ≈ 65 min on CPU. Whisper transcribes it once (48.9 s on GPU, 141 s on CPU, cached afterwards) and reduces the work to a handful of windows.</td>
+</tr>
+<tr>
+<td><strong>OCR and ASD run only inside candidate windows</strong></td>
+<td>Both are per-frame costs; running them globally is what makes naive implementations unusable on feature-length video. A widened ±15 s retry covers subtitles that sit outside the spoken window (found in validation — see §7).</td>
+</tr>
+<tr>
+<td><strong>YuNet for face detection</strong></td>
+<td>Ships inside OpenCV, ~230 KB ONNX, no extra dependency, no torch, milliseconds per frame at 480p. The pipeline already depends on OpenCV for decoding, so face detection adds nothing to the install.</td>
+</tr>
+<tr>
+<td><strong>LR-ASD for active-speaker detection</strong></td>
+<td>Best accuracy-per-parameter of the published options (0.84 M params, 94.5 % mAP on AVA, MIT-licensed). Verified on our own footage before adoption, not taken on the paper's word — see §8.</td>
+</tr>
+<tr>
+<td><strong>Optional extras, never a hard requirement</strong></td>
+<td>ASD needs torch (~200 MB). It lives in <code>requirements-asd.txt</code>; if it is absent the mode emits <code>verify: skipped</code> and returns the <code>audio+ocr</code> answer instead of failing. GPU support is a second optional file with the same contract.</td>
+</tr>
+<tr>
+<td><strong><code>uncertain</code> is a first-class outcome</strong></td>
+<td>See §3 — the difference between "nobody visible was speaking" and "I could not see well enough to tell" is exactly what an evaluator would probe.</td>
+</tr>
+<tr>
+<td><strong>Every threshold in one config module</strong></td>
+<td><code>asd_threshold</code>, <code>asd_min_active</code>, <code>ocr_match_threshold</code>, window padding, retry padding, sampling rates — all in <code>config.py</code>, so behaviour can be re-tuned and defended without hunting through the code.</td>
+</tr>
+<tr>
+<td><strong>Never a traceback</strong></td>
+<td>Bad URL, missing file, corrupt video, missing models, cancelled job: all produce a one-line message and exit code 1. The pipeline raises only <code>PipelineError</code>; anything unexpected is wrapped at the boundary.</td>
+</tr>
+</tbody>
+</table>
+<hr>
+<h2>6. Validation and results</h2>
+<table>
+<thead>
+<tr>
+<th>What</th>
+<th>Result</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Automated tests</td>
+<td><strong>151 passing</strong> (144 fast, 7 slow with real models)</td>
+</tr>
+<tr>
+<td>Synthetic ground truth (8 variants: fonts, position, fade, 360p/720p, 24/30/60 fps)</td>
+<td><strong>Exact frame on 7 of 8</strong>; worst case <strong>1 frame</strong> (12-frame fade-in) — <a href="BENCHMARK.md">BENCHMARK.md</a></td>
+</tr>
+<tr>
+<td>Test episode, <code>hybrid</code></td>
+<td><code>valid-speaker</code> · frame <strong>7801</strong> · speaker confirmed, LR-ASD mean 0.89</td>
+</tr>
+<tr>
+<td>Same episode, <code>audio+ocr</code></td>
+<td><code>audio</code> · frame <strong>7794</strong> · MEDIUM — byte-identical to the pre-rename behaviour</td>
+</tr>
+<tr>
+<td>Trailer with burned-in caption, <code>hybrid</code></td>
+<td><code>valid-text</code> · frame <strong>297</strong> · HIGH (audio window was 15 s away; the widened retry found it)</td>
+</tr>
+<tr>
+<td>Trailer title card, <code>ocr</code></td>
+<td><code>valid-text</code> · frame <strong>466</strong> · text read as <em>"MARVEL STUDIOS"</em></td>
+</tr>
+<tr>
+<td>Voice-over clip (narrator off screen)</td>
+<td><code>uncertain</code> — correctly declines to claim a visible speaker</td>
+</tr>
+<tr>
+<td>ASD extras uninstalled</td>
+<td><code>verify: skipped</code>, answer identical to <code>audio+ocr</code></td>
+</tr>
+<tr>
+<td>Failure paths (bad URL, missing file, corrupt video)</td>
+<td>One-line error, exit 1, no traceback</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Model behaviour measured on our own footage</strong>, not quoted from the paper: on the test episode's dialogue window, LR-ASD scored <strong>0.95 on the speaking span vs 0.14 on the quiet span</strong> (0 false positives at the 0.50 threshold across 81 quiet frames).</p>
+<p align="center"><img src="media/arch-speedups.svg" alt="Measured speed-ups" width="100%"></p>
+
+<table>
+<thead>
+<tr>
+<th>Stage</th>
+<th>CPU</th>
+<th>GPU</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Transcribe 54-min episode</td>
+<td>141 s</td>
+<td><strong>48.9 s</strong></td>
+<td>faster-whisper on CUDA (float16), cached after first run</td>
+</tr>
+<tr>
+<td>One OCR read</td>
+<td>598 ms</td>
+<td><strong>~20 ms</strong></td>
+<td>RapidOCR via <code>CUDAExecutionProvider</code></td>
+</tr>
+<tr>
+<td>Verify one candidate window</td>
+<td>28.4 s</td>
+<td><strong>1.2-2.5 s</strong></td>
+<td>Single-pass OCR + frame memoisation</td>
+</tr>
+<tr>
+<td>Import the package</td>
+<td>2.10 s</td>
+<td>—</td>
+<td><strong>0.23 s</strong> after moving the VAD import off the hot path</td>
+</tr>
+</tbody>
+</table>
+<p>Every GPU path falls back to CPU automatically when the CUDA libraries are missing — verified by running with them absent.</p>
+<hr>
+<h2>7. Limitations and trade-offs</h2>
+<table>
+<thead>
+<tr>
+<th>Limitation</th>
+<th>Why it exists</th>
+<th>How the system handles it</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Onset precision ≈ ±0.25 s</strong></td>
+<td>LR-ASD was trained at 25 fps; the source is 23.976 fps. MFCC hop is locked to exactly 4 audio frames per video frame, which removes drift <em>within</em> a window but not the model's own temporal resolution.</td>
+<td>Documented as ±0.25 s rather than claiming frame-exactness; the evidence pair lets a human confirm.</td>
+</tr>
+<tr>
+<td><strong>Gradual fade-in costs ~1 frame</strong></td>
+<td>"First frame" is genuinely undefined during a fade.</td>
+<td>Reports the first frame over threshold, labels it <code>fade-in</code>, and shows frame <em>n−1</em>. Measured in the benchmark.</td>
+</tr>
+<tr>
+<td><strong>Subtitles far from the spoken line</strong></td>
+<td>A weak or mistranslated ASR window can sit 15 s from the caption — found in validation on a Korean-audio clip where <code>hybrid</code> initially returned a worse answer than <code>audio+ocr</code>.</td>
+<td>Fixed: the per-window OCR now uses the same widened ±15 s retry as <code>audio+ocr</code>; re-validated to <code>valid-text</code> / frame 297.</td>
+</tr>
+<tr>
+<td><strong>Profile faces and hard cuts</strong></td>
+<td>YuNet and LR-ASD both skew frontal; a track that starts mid-line has no observable onset.</td>
+<td>Degrades to <code>uncertain</code> / the audio frame with an explicit note — never a silent wrong claim.</td>
+</tr>
+<tr>
+<td><strong>English-only OCR and matching</strong></td>
+<td>RapidOCR is configured for Latin script; the fuzzy matcher normalises ASCII.</td>
+<td>Non-Latin captions are out of scope and stated as such; Whisper's <code>translate</code> task still lets a foreign-language <em>spoken</em> line be found.</td>
+</tr>
+<tr>
+<td><strong>CPU cost without a GPU</strong></td>
+<td>OCR at ~0.6 s/frame dominates.</td>
+<td>Window-scoped work keeps a full run in the tens of seconds; GPU support is one optional install away.</td>
+</tr>
+<tr>
+<td><strong>Demo-scope service</strong></td>
+<td>Single user, in-memory jobs, one job at a time (OCR/Whisper are not re-entrant-safe).</td>
+<td>Stated in the README; a queue and persistence are the obvious next step, not a hidden flaw.</td>
+</tr>
+</tbody>
+</table>
+<hr>
+<h2>8. Alternatives considered</h2>
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th>Decision</th>
+<th>Reason</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>LR-ASD</strong> (IJCV 2025)</td>
+<td><strong>Chosen</strong></td>
+<td>0.84 M params, 94.5 % mAP on AVA, MIT licence, CPU-viable; verified on our footage (0.95 vs 0.14) before adoption</td>
+</tr>
+<tr>
+<td>Light-ASD (CVPR 2023)</td>
+<td>Rejected</td>
+<td>Same authors, superseded by LR-ASD (1.0 M params, 94.06 % mAP)</td>
+</tr>
+<tr>
+<td>TalkNet-ASD</td>
+<td>Rejected</td>
+<td>Turnkey demo, but heavier, lower mAP (92.3 %), and no licence file in the repository</td>
+</tr>
+<tr>
+<td>LoCoNet (CVPR 2024)</td>
+<td>Rejected</td>
+<td>34 M params (~40× LR-ASD) and GPU-oriented for ~0.7 pt of mAP</td>
+</tr>
+<tr>
+<td>SyncNet</td>
+<td>Rejected</td>
+<td>Lip-sync offset is a proxy for speaking, not a trained ASD head; useful fallback, weaker signal</td>
+</tr>
+<tr>
+<td>Lip-motion heuristic (landmarks + mouth-aspect-ratio correlated with VAD)</td>
+<td>Kept as fallback design</td>
+<td>No torch and fully explainable, but not a model, and weak on profile faces and small mouths</td>
+</tr>
+<tr>
+<td>Cloud video APIs (Google Video Intelligence, AWS Rekognition, Azure Video Indexer, Twelve Labs)</td>
+<td>Rejected</td>
+<td>None fuses audio with faces to answer "who is speaking"; all need bucket upload; ~$5-11 per 54-min video</td>
+</tr>
+<tr>
+<td><strong>RapidOCR</strong> vs EasyOCR / PaddleOCR / Tesseract</td>
+<td><strong>Chosen</strong> (RapidOCR)</td>
+<td>Measured: 0.5 s load and an exact read vs EasyOCR's 54 s load and split words; no torch; PaddleOCR has no Python 3.14 wheels</td>
+</tr>
+<tr>
+<td><strong>faster-whisper</strong> vs OpenAI/Groq/Deepgram APIs</td>
+<td><strong>Chosen</strong> (local)</td>
+<td>Runs offline with no API key for the reviewer; every provider documents translated-output word timestamps as unreliable, which is exactly what the OCR/ASD stages compensate for</td>
+</tr>
+<tr>
+<td>Ready-made hard-sub extractors (videocr, VideoSubFinder)</td>
+<td>Rejected</td>
+<td>They sample at fixed intervals, so they cannot guarantee the <em>first</em> frame — the actual requirement</td>
+</tr>
+</tbody>
+</table>
+<hr>
+<h2>9. Interface and running it</h2>
+<p align="center">
+<img src="media/ui-hybrid-occurrences.png" alt="Occurrence list with class badges" width="49%">
+<img src="media/ui-hybrid-result.png" alt="Result with the confirmed speaker boxed" width="49%">
+</p>
+
+<p><strong>Web page</strong> (<code>start.ps1</code> / <code>start.sh</code> → <code>http://127.0.0.1:8000</code>): two inputs and a button. While the job runs, stages report live over Server-Sent Events, a timeline bar shows the whole video with the located window and every OCR sample, and each candidate window appears as a row with its ASR score, OCR result, face count, speaking verdict and class badge. The result card shows the chosen frame, the frame before it, the extracted text, the confidence and — when a speaker was confirmed — the face box drawn on the frame.</p>
+<p><strong>Embedded player sync</strong>: the source video is cued to the found timestamp (YouTube iframe, or an HTML5 player for direct files), and clicking any candidate or occurrence seeks the player to that moment, so the answer can be checked against the original video without leaving the page. Timestamp changes use <code>postMessage</code> rather than reloading the iframe — the naive version re-created the player on every seek and tripped YouTube's rate limiting.</p>
+<p><strong>CLI</strong> (same pipeline, no server):</p>
+<pre><code class="language-bash">python -m dialogue_finder --url &quot;&lt;video url&gt;&quot; --text &quot;My mind rebels at stagnation&quot;
+</code></pre>
+<pre><code class="language-text">Timestamp : 00:05:25.365
+Frame     : 7801
+Text      : &quot;My mind rebels its stagnation.&quot;
+Confidence: HIGH  (source: audio+asd; on-screen speaker verified (LR-ASD mean 0.89))
+Occurrence: valid-speaker
+Speaker   : 218,0,304,395
+</code></pre>
+<p>Flags: <code>--local &lt;file&gt;</code> · <code>--mode hybrid|audio+ocr|audio|ocr</code> · <code>--occurrence first|last|all</code> · <code>--verbose</code> · <code>--json</code> · <code>--out &lt;dir&gt;</code>.</p>
+<p><strong>Deployment</strong>: local-first by design — one <code>pip install</code>, one script, no keys, no cloud, no data leaving the machine. Containerisation was deliberately not built: the models and video cache dominate the image size, and the interviewer's path is a clone plus a script, not a registry pull.</p>
+<hr>
+<h2>Where the deeper material lives</h2>
+<table>
+<thead>
+<tr>
+<th>Document</th>
+<th>Contents</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a href="DECISIONS.md">DECISIONS.md</a></td>
+<td>Every decision in first person — what was proposed, what changed, and why</td>
+</tr>
+<tr>
+<td><a href="BENCHMARK.md">BENCHMARK.md</a></td>
+<td>The synthetic ground-truth table: per-variant frame error and timings</td>
+</tr>
+<tr>
+<td><a href="APPROACH.md">APPROACH.md</a></td>
+<td>Full engineering log: phase-by-phase build, command outputs, bug investigations, event contracts</td>
+</tr>
+<tr>
+<td><a href="../prompts.txt">prompts.txt</a></td>
+<td>Every prompt used to build the project, verbatim and in order</td>
+</tr>
+</tbody>
+</table></body></html>

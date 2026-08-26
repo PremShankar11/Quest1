@@ -6,6 +6,10 @@
 
 </div>
 
+> **Reading this?** This file is the **full engineering log** — phase-by-phase build record, command
+> outputs, validation runs and investigations. For the concise, interviewer-facing design document see
+> **[approach_final.md](approach_final.md)** ([PDF](approach_final.pdf)).
+
 |  |  |
 |---|---|
 | **The task** | Given a video URL and a target dialogue, return the first frame where that dialogue appears — timestamp, frame number, extracted text, frame image. |
