@@ -87,6 +87,24 @@
     <p class="alts" id="r-alts"></p>
   </section>
 
+  <section class="block player-section" id="player-block" hidden aria-labelledby="pl-h">
+    <div class="player-header">
+      <h2 id="pl-h" class="eyebrow">Video Player Sync</h2>
+      <span id="player-time-badge" class="pill mono">Synced: 00:00:00</span>
+    </div>
+    <div class="player-container">
+      <div id="yt-player-wrap" class="player-frame-wrap" hidden>
+        <div id="yt-player"></div>
+      </div>
+      <video id="html5-player" class="player-video" controls hidden></video>
+      <div id="fallback-player" class="player-fallback" hidden>
+        <p class="muted">This external video format cannot be embedded directly in a browser iframe.</p>
+        <a id="external-video-link" class="external-link-btn" href="#" target="_blank" rel="noopener noreferrer">Open Video at Timestamp ↗</a>
+      </div>
+    </div>
+    <p class="player-hint muted">Click any candidate card or occurrence to jump the player to that timestamp.</p>
+  </section>
+
   <p class="error" id="error" role="alert" hidden></p>
 </main>
 <script src="/static/app.js?v=2"></script>

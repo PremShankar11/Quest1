@@ -493,6 +493,114 @@ body {
   .marker { transition: none; }
 }
 
+/* ---- video player sync ---- */
+
+.player-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.player-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.player-container {
+  position: relative;
+  width: 100%;
+  max-width: 800px;
+  margin: 0 auto;
+  border: 1px solid var(--line);
+  background: #0D0F12;
+  border-radius: 6px;
+  overflow: hidden;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+}
+
+.player-frame-wrap {
+  position: relative;
+  padding-bottom: 56.25%; /* 16:9 aspect ratio */
+  height: 0;
+  overflow: hidden;
+}
+
+.player-frame-wrap iframe,
+.player-frame-wrap #yt-player {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  border: 0;
+}
+
+.player-video {
+  width: 100%;
+  max-height: 480px;
+  display: block;
+  background: #000;
+}
+
+.player-fallback {
+  padding: 32px 24px;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+}
+
+.external-link-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--panel);
+  color: var(--teal);
+  border: 1px solid var(--teal);
+  padding: 10px 20px;
+  border-radius: 4px;
+  text-decoration: none;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 600;
+  transition: all 0.15s ease;
+}
+
+.external-link-btn:hover {
+  background: var(--teal);
+  color: var(--go-ink);
+}
+
+.player-hint {
+  font-size: 13px;
+  margin: 0;
+  text-align: center;
+}
+
+/* ---- interactive candidate thumbnails ---- */
+
+.cand {
+  cursor: pointer;
+  transition: transform 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.cand:hover {
+  transform: translateY(-2px);
+  border-color: var(--teal);
+  box-shadow: 0 4px 12px rgba(79, 209, 197, 0.25);
+}
+
+.occ-row {
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.occ-row:hover {
+  background: #2D333B;
+}
+
 /* ---- responsive ---- */
 
 @media (max-width: 720px) {
@@ -500,3 +608,4 @@ body {
   .go { width: 100%; }
   .pair { grid-template-columns: 1fr; }
 }
+

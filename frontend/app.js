@@ -17,6 +17,7 @@ const showError = (msg, detail) => {
 function reset() {
   error.hidden = true; $("result").hidden = true; $("cands-block").hidden = true; $("transcript-block").hidden = true;
   $("occurrences-block").hidden = true; $("occurrences").innerHTML = ""; $("occ-marks").innerHTML = "";
+  $("player-block").hidden = true;
   $("filmstrip").innerHTML = ""; $("ticks").innerHTML = ""; $("window").hidden = true; $("marker").hidden = true;
   delete $("timeline").dataset.route; delete $("result").dataset.route;
   $("tc-end").textContent = "--:--:--"; duration = 0; fps = 0; seenCandidates.clear();
@@ -67,6 +68,120 @@ function speakMarkFor(klass) {
   return "?";
 }
 
+let ytPlayer = null, ytReady = false, pendingVideoSync = null, currentVideoUrl = "";
+
+function parseYouTubeId(url) {
+  if (!url) return null;
+  const m = url.match(/(?:youtu\.be\/|youtube\.com\/(?:watch\?(?:.*&)?v=|embed\/|v\/|shorts\/))([\w-]{11})/i);
+  return m ? m[1] : null;
+}
+
+function isDirectVideo(url) {
+  if (!url) return false;
+  return /\.(mp4|webm|ogg|m4v|mov)(\?.*)?$/i.test(url) || url.startsWith("blob:") || url.startsWith("data:") || url.startsWith("file://") || /^[A-Za-z]:[\\\/]/.test(url);
+}
+
+function initYouTubeApi() {
+  if (window.YT && window.YT.Player) {
+    ytReady = true; return;
+  }
+  const tag = document.createElement("script");
+  tag.src = "https://www.youtube.com/iframe_api";
+  const firstScriptTag = document.getElementsByTagName("script")[0];
+  if (firstScriptTag && firstScriptTag.parentNode) {
+    firstScriptTag.parentNode.insertBefore(tag, firstScriptTag);
+  } else {
+    document.head.appendChild(tag);
+  }
+  window.onYouTubeIframeAPIReady = () => {
+    ytReady = true;
+    if (pendingVideoSync) {
+      syncVideoPlayer(pendingVideoSync.url, pendingVideoSync.timestamp_s);
+      pendingVideoSync = null;
+    }
+  };
+}
+initYouTubeApi();
+
+function syncVideoPlayer(url, timestamp_s) {
+  if (!url || timestamp_s === undefined || timestamp_s === null) return;
+  const playerBlock = $("player-block");
+  if (!playerBlock) return;
+  playerBlock.hidden = false;
+  $("player-time-badge").textContent = `Synced: ${tc(timestamp_s)}`;
+
+  const ytWrap = $("yt-player-wrap");
+  const html5Player = $("html5-player");
+  const fallbackPlayer = $("fallback-player");
+
+  const ytId = parseYouTubeId(url);
+  if (ytId) {
+    ytWrap.hidden = false;
+    html5Player.hidden = true;
+    fallbackPlayer.hidden = true;
+
+    if (!ytReady) {
+      pendingVideoSync = { url, timestamp_s };
+      return;
+    }
+
+    if (!ytPlayer) {
+      ytPlayer = new YT.Player("yt-player", {
+        height: "100%",
+        width: "100%",
+        videoId: ytId,
+        playerVars: {
+          start: Math.floor(timestamp_s),
+          autoplay: 0,
+          rel: 0,
+          modestbranding: 1
+        },
+        events: {
+          onReady: (event) => {
+            event.target.seekTo(timestamp_s, true);
+            event.target.pauseVideo();
+          }
+        }
+      });
+      currentVideoUrl = url;
+    } else {
+      if (currentVideoUrl !== url) {
+        currentVideoUrl = url;
+        ytPlayer.cueVideoById({ videoId: ytId, startSeconds: Math.floor(timestamp_s) });
+      } else {
+        ytPlayer.seekTo(timestamp_s, true);
+        ytPlayer.pauseVideo();
+      }
+    }
+  } else if (isDirectVideo(url)) {
+    ytWrap.hidden = true;
+    html5Player.hidden = false;
+    fallbackPlayer.hidden = true;
+
+    if (html5Player.src !== url) {
+      html5Player.src = url;
+    }
+    html5Player.currentTime = timestamp_s;
+    html5Player.pause();
+  } else {
+    ytWrap.hidden = true;
+    html5Player.hidden = true;
+    fallbackPlayer.hidden = false;
+
+    const extLink = $("external-video-link");
+    if (extLink) {
+      let extUrl = url;
+      if (url.includes("?") && !url.includes("t=")) {
+        extUrl = `${url}&t=${Math.floor(timestamp_s)}`;
+      } else if (!url.includes("t=")) {
+        extUrl = `${url}#t=${Math.floor(timestamp_s)}`;
+      }
+      extLink.href = extUrl;
+      extLink.textContent = `Open Video at ${tc(timestamp_s)} ↗`;
+    }
+  }
+}
+
 function renderOccurrences(occurrences) {
   const list = $("occurrences"), marks = $("occ-marks");
   list.innerHTML = ""; marks.innerHTML = "";
@@ -76,6 +191,11 @@ function renderOccurrences(occurrences) {
     const speakMark = speakMarkFor(occ.klass);
     const li = document.createElement("li");
     li.className = "occ-row"; li.dataset.klass = occ.klass;
+    li.title = "Click to jump video to this scene";
+    li.addEventListener("click", () => {
+      syncVideoPlayer($("url").value.trim(), w.start_s);
+    });
+
     const main = document.createElement("span");
     main.className = "mono";
     main.textContent = `${tc(w.start_s)}–${tc(w.end_s)} · ASR ${w.score.toFixed(2)} · OCR ${ocrMark} · faces ${occ.faces} · speaking ${speakMark}`;
@@ -108,7 +228,12 @@ function addCandidate(frame, score, text, timestamp_s) {
   const timeLabel = timestamp_s !== undefined ? tc(timestamp_s) : (fps ? tc(frame / fps) : "");
   const timePrefix = timeLabel ? `${timeLabel} · ` : "";
   d.innerHTML = `<img src="/jobs/${jobId}/frames/${frame}.png?w=320" alt="frame ${frame}" loading="lazy"><figcaption class="mono">${timePrefix}${frame} · ${score.toFixed(2)}</figcaption>`;
-  d.title = text || ""; $("filmstrip").appendChild(d);
+  d.title = text ? `${text} (Click to jump video)` : "Click to jump video";
+  d.addEventListener("click", () => {
+    const t = timestamp_s !== undefined ? timestamp_s : (fps ? frame / fps : 0);
+    syncVideoPlayer($("url").value.trim(), t);
+  });
+  $("filmstrip").appendChild(d);
 }
 
 function placeMarker(t) { const m = $("marker"); m.style.left = pct(t); $("marker-tc").textContent = tc(t); m.hidden = false; }
@@ -148,6 +273,8 @@ async function finish(st, msg, payload) {
   $("r-text").textContent = r.text; $("r-note").textContent = r.note || "";
   $("r-alts").textContent = r.alternatives?.length ? "Also at: " + r.alternatives.map((a) => `frame ${a.frame_index} (${tc(a.timestamp_s)})`).join(", ") : "";
   $("result").hidden = false;
+
+  syncVideoPlayer($("url").value.trim(), r.timestamp_s);
 }
 
 function escapeHtml(s) { return s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
@@ -164,3 +291,4 @@ form.addEventListener("submit", async (e) => {
   es.onerror = () => { if (es && es.readyState === EventSource.CLOSED) showError("Lost the connection to the server. Restart it and try again."); };
 });
 $("cancel").addEventListener("click", () => jobId && fetch(`/jobs/${jobId}/cancel`, { method: "POST" }));
+

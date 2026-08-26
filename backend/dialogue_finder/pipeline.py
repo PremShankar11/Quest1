@@ -191,7 +191,7 @@ def _run_hybrid(src: FrameSource, video: Path, windows: list[Window], target: st
         occurrences.append(occ)
         reporter.emit(StageEvent("verify", "ok", f"window {i}: {occ.klass}",
                                  payload={"window_index": i, "faces": occ.faces, "asd_mean": occ.asd_mean}))
-        if occurrence in ("first", "last") and occ.klass in ("valid-text", "valid-speaker") and occ.window.score >= 0.85:
+        if occurrence in ("first", "last") and occ.klass in ("valid-text", "valid-speaker") and occ.window.score >= 0.80:
             if not any(w.score > occ.window.score for w in windows_to_scan[i + 1:]):
                 break
     timings["verify"] = time.perf_counter() - t2
