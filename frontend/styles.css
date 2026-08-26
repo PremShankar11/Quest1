@@ -554,8 +554,45 @@ body {
   padding-bottom: 56.25%; /* 16:9 aspect ratio */
   height: 0;
   overflow: hidden;
+  background: #000;
 }
 
+/* Thumbnail sits behind the iframe as a fallback */
+.player-thumb {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  z-index: 1;
+}
+
+/* Play button overlay on the thumbnail */
+.thumb-play-btn {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 2;
+  width: 68px;
+  height: 48px;
+  background: rgba(0, 0, 0, 0.7);
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-size: 24px;
+  text-decoration: none;
+  transition: background 0.2s ease;
+}
+
+.thumb-play-btn:hover {
+  background: #e02020;
+}
+
+/* Iframe sits on top of the thumbnail — if it loads, it covers it */
 .player-frame-wrap iframe,
 .player-frame-wrap #yt-player {
   position: absolute;
@@ -564,6 +601,7 @@ body {
   width: 100%;
   height: 100%;
   border: 0;
+  z-index: 3;
 }
 
 .player-video {

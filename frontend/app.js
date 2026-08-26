@@ -144,6 +144,14 @@ function syncVideoPlayer(url, timestamp_s = 0, shouldScroll = false) {
     html5Player.hidden = true;
     fallbackPlayer.hidden = true;
 
+    // Always set the thumbnail (loads from img CDN, almost never blocked)
+    const ytThumb = $("yt-thumb");
+    const ytPlayBtn = $("yt-thumb-play");
+    if (ytThumb) ytThumb.src = `https://img.youtube.com/vi/${ytId}/hqdefault.jpg`;
+
+    const watchUrl = `https://www.youtube.com/watch?v=${ytId}&t=${startSec}s`;
+    if (ytPlayBtn) ytPlayBtn.href = watchUrl;
+
     const ytEmbedUrl = `https://www.youtube.com/embed/${ytId}?start=${startSec}&autoplay=0&rel=0&enablejsapi=1`;
     if (ytIframe) {
       if (ytIframe.dataset.videoId !== ytId || ytIframe.dataset.startSec != startSec) {
@@ -159,7 +167,6 @@ function syncVideoPlayer(url, timestamp_s = 0, shouldScroll = false) {
       }
     }
 
-    const watchUrl = `https://www.youtube.com/watch?v=${ytId}&t=${startSec}s`;
     if (directLink) {
       directLink.href = watchUrl;
       directLink.textContent = `Open on YouTube (${formattedTc}) ↗`;

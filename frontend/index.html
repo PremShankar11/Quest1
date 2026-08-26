@@ -7,7 +7,7 @@
 <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🎬</text></svg>">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600&family=Barlow:wght@400;500&family=JetBrains+Mono:wght@400;600&display=swap">
-<link rel="stylesheet" href="/static/styles.css?v=13">
+<link rel="stylesheet" href="/static/styles.css?v=14">
 </head>
 <body>
 <main class="page">
@@ -39,7 +39,9 @@
     </div>
     <div class="player-container" id="player-container">
       <div id="yt-player-wrap" class="player-frame-wrap" hidden>
-        <iframe id="yt-iframe" class="player-iframe" src="" title="YouTube Video Player" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe>
+        <img id="yt-thumb" class="player-thumb" src="" alt="Video thumbnail">
+        <a id="yt-thumb-play" class="thumb-play-btn" href="#" target="_blank" rel="noopener noreferrer" title="Watch on YouTube">▶</a>
+        <iframe id="yt-iframe" class="player-iframe" src="" title="YouTube Video Player" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen loading="lazy"></iframe>
       </div>
       <video id="html5-player" class="player-video" controls hidden></video>
       <div id="fallback-player" class="player-fallback" hidden>
@@ -112,6 +114,6 @@
 
   <p class="error" id="error" role="alert" hidden></p>
 </main>
-<script src="/static/app.js?v=13"></script>
+<script src="/static/app.js?v=14"></script>
 </body>
 </html>
