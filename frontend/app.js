@@ -70,9 +70,22 @@ function speakMarkFor(klass) {
 
 let ytPlayer = null, ytReady = false, pendingVideoSync = null, currentVideoUrl = "";
 
-function parseYouTubeId(url) {
-  if (!url) return null;
-  const m = url.match(/(?:youtu\.be\/|youtube\.com\/(?:watch\?(?:.*&)?v=|embed\/|v\/|shorts\/))([\w-]{11})/i);
+function parseYouTubeId(raw) {
+  if (!raw) return null;
+  const s = raw.trim();
+  try {
+    const url = new URL(s.startsWith("http") ? s : `https://${s}`);
+    if (url.hostname.includes("youtube.com")) {
+      if (url.searchParams.has("v")) return url.searchParams.get("v");
+      const parts = url.pathname.split("/").filter(Boolean);
+      if (parts[0] === "embed" || parts[0] === "v" || parts[0] === "shorts") return parts[1];
+    }
+    if (url.hostname.includes("youtu.be")) {
+      const parts = url.pathname.split("/").filter(Boolean);
+      return parts[0] || null;
+    }
+  } catch {}
+  const m = s.match(/(?:youtu\.be\/|youtube\.com\/(?:watch\?.*v=|embed\/|v\/|shorts\/))([\w-]{11})/);
   return m ? m[1] : null;
 }
 
@@ -107,10 +120,9 @@ function syncVideoPlayer(url, timestamp_s = 0, shouldScroll = false) {
   if (!url) return;
   const playerBlock = $("player-block");
   if (!playerBlock) return;
-  playerBlock.hidden = false;
   
   const formattedTc = tc(timestamp_s);
-  const startSec = Math.floor(timestamp_s);
+  const startSec = Math.max(0, Math.floor(timestamp_s));
   $("player-time-badge").textContent = `Synced: ${formattedTc}`;
 
   const ytWrap = $("yt-player-wrap");
@@ -121,7 +133,8 @@ function syncVideoPlayer(url, timestamp_s = 0, shouldScroll = false) {
   const extLink = $("external-video-link");
 
   const ytId = parseYouTubeId(url);
-  if (ytId) {
+  if (ytId && ytId.length === 11) {
+    playerBlock.hidden = false;
     ytWrap.hidden = false;
     html5Player.hidden = true;
     fallbackPlayer.hidden = true;
@@ -148,6 +161,7 @@ function syncVideoPlayer(url, timestamp_s = 0, shouldScroll = false) {
       directLink.hidden = false;
     }
   } else if (isDirectVideo(url)) {
+    playerBlock.hidden = false;
     ytWrap.hidden = true;
     html5Player.hidden = false;
     fallbackPlayer.hidden = true;
@@ -163,8 +177,8 @@ function syncVideoPlayer(url, timestamp_s = 0, shouldScroll = false) {
       directLink.textContent = `Open direct video file ↗`;
       directLink.hidden = false;
     }
-  } else {
-    // External streaming video host (e.g. ok.ru, dailymotion, etc.)
+  } else if (url.startsWith("http://") || url.startsWith("https://")) {
+    playerBlock.hidden = false;
     ytWrap.hidden = true;
     html5Player.hidden = true;
     fallbackPlayer.hidden = false;
@@ -182,7 +196,7 @@ function syncVideoPlayer(url, timestamp_s = 0, shouldScroll = false) {
     }
   }
 
-  if (shouldScroll) {
+  if (shouldScroll && !playerBlock.hidden) {
     playerBlock.scrollIntoView({ behavior: "smooth", block: "start" });
   }
 }
