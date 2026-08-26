@@ -505,12 +505,36 @@ body {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.player-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.link-btn {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--teal);
+  text-decoration: none;
+  border: 1px solid var(--teal);
+  padding: 4px 10px;
+  border-radius: 999px;
+  transition: all 0.15s ease;
+}
+
+.link-btn:hover {
+  background: var(--teal);
+  color: var(--go-ink);
 }
 
 .player-container {
   position: relative;
   width: 100%;
-  max-width: 800px;
+  max-width: 850px;
   margin: 0 auto;
   border: 1px solid var(--line);
   background: #0D0F12;

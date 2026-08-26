@@ -108,11 +108,17 @@ function syncVideoPlayer(url, timestamp_s) {
   const playerBlock = $("player-block");
   if (!playerBlock) return;
   playerBlock.hidden = false;
-  $("player-time-badge").textContent = `Synced: ${tc(timestamp_s)}`;
+  
+  const formattedTc = tc(timestamp_s);
+  const startSec = Math.floor(timestamp_s);
+  $("player-time-badge").textContent = `Synced: ${formattedTc}`;
 
   const ytWrap = $("yt-player-wrap");
+  const ytIframe = $("yt-iframe");
   const html5Player = $("html5-player");
   const fallbackPlayer = $("fallback-player");
+  const directLink = $("player-direct-link");
+  const extLink = $("external-video-link");
 
   const ytId = parseYouTubeId(url);
   if (ytId) {
@@ -120,38 +126,18 @@ function syncVideoPlayer(url, timestamp_s) {
     html5Player.hidden = true;
     fallbackPlayer.hidden = true;
 
-    if (!ytReady) {
-      pendingVideoSync = { url, timestamp_s };
-      return;
+    const ytEmbedUrl = `https://www.youtube.com/embed/${ytId}?start=${startSec}&autoplay=0&rel=0&enablejsapi=1`;
+    if (ytIframe && (ytIframe.dataset.videoId !== ytId || ytIframe.dataset.startSec != startSec)) {
+      ytIframe.dataset.videoId = ytId;
+      ytIframe.dataset.startSec = startSec;
+      ytIframe.src = ytEmbedUrl;
     }
 
-    if (!ytPlayer) {
-      ytPlayer = new YT.Player("yt-player", {
-        height: "100%",
-        width: "100%",
-        videoId: ytId,
-        playerVars: {
-          start: Math.floor(timestamp_s),
-          autoplay: 0,
-          rel: 0,
-          modestbranding: 1
-        },
-        events: {
-          onReady: (event) => {
-            event.target.seekTo(timestamp_s, true);
-            event.target.pauseVideo();
-          }
-        }
-      });
-      currentVideoUrl = url;
-    } else {
-      if (currentVideoUrl !== url) {
-        currentVideoUrl = url;
-        ytPlayer.cueVideoById({ videoId: ytId, startSeconds: Math.floor(timestamp_s) });
-      } else {
-        ytPlayer.seekTo(timestamp_s, true);
-        ytPlayer.pauseVideo();
-      }
+    const watchUrl = `https://www.youtube.com/watch?v=${ytId}&t=${startSec}s`;
+    if (directLink) {
+      directLink.href = watchUrl;
+      directLink.textContent = `Open on YouTube (${formattedTc}) ↗`;
+      directLink.hidden = false;
     }
   } else if (isDirectVideo(url)) {
     ytWrap.hidden = true;
@@ -163,21 +149,28 @@ function syncVideoPlayer(url, timestamp_s) {
     }
     html5Player.currentTime = timestamp_s;
     html5Player.pause();
+
+    if (directLink) {
+      directLink.href = url;
+      directLink.textContent = `Open direct video file ↗`;
+      directLink.hidden = false;
+    }
   } else {
+    // External streaming video host (e.g. ok.ru, dailymotion, etc.)
     ytWrap.hidden = true;
     html5Player.hidden = true;
     fallbackPlayer.hidden = false;
+    if (directLink) directLink.hidden = true;
 
-    const extLink = $("external-video-link");
+    let extUrl = url;
+    if (url.includes("?") && !url.includes("t=")) {
+      extUrl = `${url}&t=${startSec}`;
+    } else if (!url.includes("t=")) {
+      extUrl = `${url}#t=${startSec}`;
+    }
     if (extLink) {
-      let extUrl = url;
-      if (url.includes("?") && !url.includes("t=")) {
-        extUrl = `${url}&t=${Math.floor(timestamp_s)}`;
-      } else if (!url.includes("t=")) {
-        extUrl = `${url}#t=${Math.floor(timestamp_s)}`;
-      }
       extLink.href = extUrl;
-      extLink.textContent = `Open Video at ${tc(timestamp_s)} ↗`;
+      extLink.textContent = `Open Video at ${formattedTc} ↗`;
     }
   }
 }
