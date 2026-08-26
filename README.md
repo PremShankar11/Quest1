@@ -24,7 +24,7 @@
 
 ---
 
-## Quick start
+## ⚡ Quick start
 
 ```bash
 py -3.14 -m venv .venv && .venv\Scripts\pip install -r requirements.txt
@@ -43,49 +43,23 @@ The browser opens at `http://127.0.0.1:8000`. Paste a URL, type a line, press **
 
 ---
 
-## Demos
+## 🎬 Demos
 
-One recording per mode, on the same trailer. **The previews play by themselves** — click any of them to open the full-length recording.
+One recording per mode, on the same trailer. The previews play by themselves; each links to the full-length video on Google Drive.
 
 <!-- demos:start -->
 
-| [![hybrid mode demo](docs/media/preview-hybrid.gif)](docs/media/demo-hybrid.mp4) | [![audio-ocr mode demo](docs/media/preview-audio-ocr.gif)](docs/media/demo-audio-ocr.mp4) |
+| [![hybrid mode demo](docs/media/preview-hybrid.gif)](https://drive.google.com/file/d/1G0wY0Kn92Q0z8EiA4hMlO2q6NXNy3FKC/view?usp=sharing) | [![audio+ocr mode demo](docs/media/preview-audio-ocr.gif)](https://drive.google.com/file/d/1iZbPQa1aieW8B3dVtSnCsVvP5Ts4XjL-/view?usp=sharing) |
 |:---:|:---:|
-| **`hybrid`** — the full pipeline<br><sub>Audio finds every occurrence, OCR checks for on-screen text, and an active-speaker model checks **whether a visible person is actually saying it**.</sub> | **`audio+ocr`** — locate, then confirm<br><sub>Whisper narrows the search to a few seconds; OCR pins the exact frame where the subtitle appears.</sub> |
-| [![ocr mode demo](docs/media/preview-ocr.gif)](docs/media/demo-ocr.mp4) | [![audio mode demo](docs/media/preview-audio.gif)](docs/media/demo-audio.mp4) |
-| **`ocr`** — on-screen text only<br><sub>No audio at all. Scans frames for the text: title cards, captions, signage.</sub> | **`audio`** — spoken word only<br><sub>Straight to the transcript. The fastest answer when only the spoken moment matters.</sub> |
+| **`hybrid`** — the full pipeline<br><sub>Audio finds every occurrence, OCR checks for on-screen text, and an active-speaker model confirms **whether a visible person is actually saying it**.</sub><br><br>▶️ **[Watch the full run](https://drive.google.com/file/d/1G0wY0Kn92Q0z8EiA4hMlO2q6NXNy3FKC/view?usp=sharing)** | **`audio+ocr`** — locate, then confirm<br><sub>Whisper narrows the search to a few seconds; OCR pins the exact frame where the subtitle appears.</sub><br><br>▶️ **[Watch the full run](https://drive.google.com/file/d/1iZbPQa1aieW8B3dVtSnCsVvP5Ts4XjL-/view?usp=sharing)** |
+| [![ocr mode demo](docs/media/preview-ocr.gif)](https://drive.google.com/file/d/1Q1oxfV4o5juBckLYkGXd5rhhBiK8_ZRs/view?usp=sharing) | [![audio mode demo](docs/media/preview-audio.gif)](https://drive.google.com/file/d/1kKw3xgsFv6mHfgQWWAxqMp9nJiPpAfh7/view?usp=sharing) |
+| **`ocr`** — on-screen text only<br><sub>No audio at all. Scans frames for the text: title cards, captions, signage.</sub><br><br>▶️ **[Watch the full run](https://drive.google.com/file/d/1Q1oxfV4o5juBckLYkGXd5rhhBiK8_ZRs/view?usp=sharing)** | **`audio`** — spoken word only<br><sub>Straight to the transcript. The fastest answer when only the spoken moment matters.</sub><br><br>▶️ **[Watch the full run](https://drive.google.com/file/d/1kKw3xgsFv6mHfgQWWAxqMp9nJiPpAfh7/view?usp=sharing)** |
 
 <!-- demos:end -->
 
-<details>
-<summary><b>Enable full video players with controls</b> — one-time, after the repository is pushed</summary>
-<br>
-
-GitHub plays a video inline only when the file is served from GitHub's own asset host; a video linked
-from the repository downloads instead. To upgrade the four previews into real players with scrubbing
-and full resolution:
-
-1. Open any issue on the pushed repository (you do not have to submit it).
-2. Drag `docs/media/demo-hybrid.mp4` into the comment box and wait for the upload to finish.
-3. Copy the URL GitHub inserts — it looks like `https://github.com/user-attachments/assets/...`.
-4. Repeat for the other three, then run:
-
-```bash
-.venv\Scripts\python scripts\embed_videos.py ^
-  --hybrid    https://github.com/user-attachments/assets/... ^
-  --audio-ocr https://github.com/user-attachments/assets/... ^
-  --ocr       https://github.com/user-attachments/assets/... ^
-  --audio     https://github.com/user-attachments/assets/...
-```
-
-The script rewrites the block between the `demos:start` / `demos:end` markers into real
-`<video controls>` players. `--reset` puts the GIF previews back.
-
-</details>
-
 ---
 
-## Interface
+## 🖥️ Interface
 
 | ![Idle state](docs/media/ui-idle.png) | ![Player synced to the result timestamp](docs/media/ui-player-sync.png) |
 |:---:|:---:|
@@ -109,7 +83,7 @@ The script rewrites the block between the `demos:start` / `demos:end` markers in
 
 ---
 
-## How it finds the frame
+## 🧠 How it finds the frame
 
 ```mermaid
 flowchart LR
@@ -147,7 +121,7 @@ Full reasoning, measurements and trade-offs: **[docs/approach_final.md](docs/app
 
 ---
 
-## Modes
+## 🎛️ Modes
 
 | Mode | What it uses | Best for | Extra install |
 |:---|:---|:---|:---|
@@ -163,7 +137,7 @@ Add `--occurrence first | last | all` when the line is said more than once.
 
 ---
 
-## Command line
+## ⌨️ Command line
 
 ```bash
 cd backend
@@ -200,7 +174,7 @@ Frames are 0-based, timestamps are `HH:MM:SS.sss`, and a weak answer is labelled
 
 ---
 
-## Install
+## 📦 Install
 
 <table>
 <tr><th align="left" width="30%">Step</th><th align="left">Command</th></tr>
@@ -230,7 +204,7 @@ Model files are SHA-256 verified on every download **and** every load — a mism
 
 ---
 
-## Validation
+## ✅ Validation
 
 ```bash
 cd backend && ..\.venv\Scripts\python -m pytest -q
@@ -247,7 +221,7 @@ cd backend && ..\.venv\Scripts\python -m pytest -q
 
 ---
 
-## Documentation
+## 📚 Documentation
 
 | Document | Contents |
 |---|---|
@@ -259,12 +233,12 @@ cd backend && ..\.venv\Scripts\python -m pytest -q
 
 ---
 
-## Limitations
+## ⚠️ Limitations
 
 - Onset accuracy for a speaking face is about ±0.25 s — stated precision, not a frame-exact claim.
 - Profile faces and hard cuts weaken speaker detection; the system reports `uncertain` instead of guessing.
 - Demo scope: single user, jobs held in memory, one job at a time.
 
-## Built on
+## 🛠️ Built on
 
 [faster-whisper](https://github.com/SYSTRAN/faster-whisper) · [RapidOCR](https://github.com/RapidAI/RapidOCR) · [LR-ASD](https://github.com/Junhua-Liao/LR-ASD) (MIT) · [OpenCV YuNet](https://github.com/opencv/opencv_zoo) · [yt-dlp](https://github.com/yt-dlp/yt-dlp) · [FastAPI](https://fastapi.tiangolo.com/)
