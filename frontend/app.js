@@ -319,18 +319,36 @@ async function finish(st, msg, payload) {
 
 function escapeHtml(s) { return s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
 
-// Preload player preview as user types or pastes video URL
-$("url").addEventListener("input", (e) => {
-  const u = e.target.value.trim();
-  if (u) syncVideoPlayer(u, 0, false);
+// Debounce helper: only call fn after the user stops for `delay` ms
+let _urlDebounceTimer = null;
+function debouncedSync(delay = 800) {
+  clearTimeout(_urlDebounceTimer);
+  _urlDebounceTimer = setTimeout(() => {
+    const u = $("url").value.trim();
+    if (u && parseYouTubeId(u)) syncVideoPlayer(u, 0, false);
+  }, delay);
+}
+
+// On paste: load player immediately (user pasted a full URL)
+$("url").addEventListener("paste", () => {
+  setTimeout(() => {
+    const u = $("url").value.trim();
+    if (u) syncVideoPlayer(u, 0, false);
+  }, 50);
 });
-$("url").addEventListener("change", (e) => {
-  const u = e.target.value.trim();
+
+// On blur/change: load player when user leaves the field
+$("url").addEventListener("change", () => {
+  const u = $("url").value.trim();
   if (u) syncVideoPlayer(u, 0, false);
 });
 
+// On typing: debounced — only load after 800ms of no keystrokes
+$("url").addEventListener("input", () => debouncedSync(800));
+
 form.addEventListener("submit", async (e) => {
   e.preventDefault(); reset();
+  clearTimeout(_urlDebounceTimer);
   const inputUrl = $("url").value.trim();
   syncVideoPlayer(inputUrl, 0, false);
   $("go").disabled = true; $("go").textContent = "Finding…"; setState("running", "running");
@@ -344,8 +362,9 @@ form.addEventListener("submit", async (e) => {
 });
 $("cancel").addEventListener("click", () => jobId && fetch(`/jobs/${jobId}/cancel`, { method: "POST" }));
 
-// Load initial video preview if URL field has initial value
+// Load initial video preview if URL field has initial value (e.g. browser autofill)
 const initialUrl = $("url") ? $("url").value.trim() : "";
 if (initialUrl) {
   syncVideoPlayer(initialUrl, 0, false);
 }
+
