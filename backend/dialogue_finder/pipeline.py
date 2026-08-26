@@ -81,10 +81,12 @@ def _default_extractor() -> TextExtractor:
 
 def _scan_for_groups(src: FrameSource, ex: TextExtractor, target: str, a: float, b: float, fps: float,
                      cfg: Config, reporter: ProgressReporter, occurrence: str,
-                     should_cancel: Callable[[], bool] | None = None
+                     should_cancel: Callable[[], bool] | None = None,
+                     existing_cands: list[Candidate] | None = None
                      ) -> tuple[list[Candidate], list[list[Candidate]]]:
     """OCR-scan [a, b] and group the hits into candidate occurrences."""
-    cands = coarse_scan(src, ex, target, a, b, fps, cfg, reporter, should_cancel=should_cancel)
+    cands = coarse_scan(src, ex, target, a, b, fps, cfg, reporter, should_cancel=should_cancel,
+                        existing_cands=existing_cands)
     groups = pick_group(group_hits(cands, cfg.ocr_match_threshold, cfg.hit_gap_s), occurrence)
     return cands, groups
 
@@ -113,7 +115,7 @@ def retry_ocr_scan_if_missed(src: FrameSource, ex: TextExtractor, target: str, c
     reporter.emit(StageEvent("scan", "fallback",
                              f"no match in window; retrying {r_a:.0f}-{r_b:.0f}s at {cfg.fullscan_fps} fps"))
     cands, groups = _scan_for_groups(src, ex, target, r_a, r_b, cfg.fullscan_fps, cfg, reporter, occurrence,
-                                     should_cancel)
+                                     should_cancel=should_cancel, existing_cands=cands)
     if groups:
         fps = cfg.fullscan_fps
     return cands, groups, fps
