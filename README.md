@@ -4,10 +4,17 @@
 
 **Give it a video and a line of dialogue. It gives you back the exact frame.**
 
-[![tests](https://img.shields.io/badge/tests-151%20passing-4FD1C5?style=for-the-badge)](#validation)
-[![python](https://img.shields.io/badge/python-3.14-2b5b84?style=for-the-badge&logo=python&logoColor=white)](#install)
-[![modes](https://img.shields.io/badge/modes-4-F2B33D?style=for-the-badge)](#modes)
-[![local](https://img.shields.io/badge/runs-100%25%20local-8F95A0?style=for-the-badge)](#install)
+![Python](https://img.shields.io/badge/Python%203.14-3776AB?style=for-the-badge&logo=python&logoColor=white)
+![FastAPI](https://img.shields.io/badge/FastAPI-009688?style=for-the-badge&logo=fastapi&logoColor=white)
+![OpenCV](https://img.shields.io/badge/OpenCV-5C3EE8?style=for-the-badge&logo=opencv&logoColor=white)
+![PyTorch](https://img.shields.io/badge/PyTorch-EE4C2C?style=for-the-badge&logo=pytorch&logoColor=white)
+![ONNX Runtime](https://img.shields.io/badge/ONNX%20Runtime-005CED?style=for-the-badge&logo=onnx&logoColor=white)
+
+![Whisper](https://img.shields.io/badge/faster--whisper-412991?style=for-the-badge&logo=openai&logoColor=white)
+![RapidOCR](https://img.shields.io/badge/RapidOCR-0F9D58?style=for-the-badge&logo=googlelens&logoColor=white)
+![LR-ASD](https://img.shields.io/badge/LR--ASD-F2B33D?style=for-the-badge&logo=probot&logoColor=black)
+![CUDA](https://img.shields.io/badge/CUDA-76B900?style=for-the-badge&logo=nvidia&logoColor=white)
+![Vanilla JS](https://img.shields.io/badge/Vanilla%20JS-F7DF1E?style=for-the-badge&logo=javascript&logoColor=black)
 
 <img src="docs/media/ui-hybrid-result.png" alt="Result card: timecode, frame number, the frame before and after, with the verified on-screen speaker boxed" width="850">
 
@@ -38,58 +45,17 @@ The browser opens at `http://127.0.0.1:8000`. Paste a URL, type a line, press **
 
 ## Demos
 
-One recording per mode, on the same trailer. The previews below play automatically; click any of them to open the full-length recording.
+One recording per mode, on the same trailer. **The previews play by themselves** — click any of them to open the full-length recording.
 
-<table>
-<tr>
-<td width="50%" valign="top">
+<!-- demos:start -->
 
-### hybrid — the full pipeline
+| [![hybrid mode demo](docs/media/preview-hybrid.gif)](docs/media/demo-hybrid.mp4) | [![audio-ocr mode demo](docs/media/preview-audio-ocr.gif)](docs/media/demo-audio-ocr.mp4) |
+|:---:|:---:|
+| **`hybrid`** — the full pipeline<br><sub>Audio finds every occurrence, OCR checks for on-screen text, and an active-speaker model checks **whether a visible person is actually saying it**.</sub> | **`audio+ocr`** — locate, then confirm<br><sub>Whisper narrows the search to a few seconds; OCR pins the exact frame where the subtitle appears.</sub> |
+| [![ocr mode demo](docs/media/preview-ocr.gif)](docs/media/demo-ocr.mp4) | [![audio mode demo](docs/media/preview-audio.gif)](docs/media/demo-audio.mp4) |
+| **`ocr`** — on-screen text only<br><sub>No audio at all. Scans frames for the text: title cards, captions, signage.</sub> | **`audio`** — spoken word only<br><sub>Straight to the transcript. The fastest answer when only the spoken moment matters.</sub> |
 
-Audio finds every occurrence, OCR checks for on-screen text, and an active-speaker model checks **whether a visible person is actually saying it**.
-
-<!-- demo:hybrid -->
-<a href="docs/media/demo-hybrid.mp4"><img src="docs/media/preview-hybrid.gif" alt="hybrid mode demo" width="100%"></a>
-<!-- /demo:hybrid -->
-
-</td>
-<td width="50%" valign="top">
-
-### audio+ocr — locate, then confirm
-
-Whisper narrows the search to a few seconds; OCR pins the exact frame where the subtitle appears.
-
-<!-- demo:audio-ocr -->
-<a href="docs/media/demo-audio-ocr.mp4"><img src="docs/media/preview-audio-ocr.gif" alt="audio+ocr mode demo" width="100%"></a>
-<!-- /demo:audio-ocr -->
-
-</td>
-</tr>
-<tr>
-<td width="50%" valign="top">
-
-### ocr — on-screen text only
-
-No audio at all. Scans frames for the text: title cards, captions, signage.
-
-<!-- demo:ocr -->
-<a href="docs/media/demo-ocr.mp4"><img src="docs/media/preview-ocr.gif" alt="ocr mode demo" width="100%"></a>
-<!-- /demo:ocr -->
-
-</td>
-<td width="50%" valign="top">
-
-### audio — spoken word only
-
-Straight to the transcript. The fastest answer when only the spoken moment matters.
-
-<!-- demo:audio -->
-<a href="docs/media/demo-audio.mp4"><img src="docs/media/preview-audio.gif" alt="audio mode demo" width="100%"></a>
-<!-- /demo:audio -->
-
-</td>
-</tr>
-</table>
+<!-- demos:end -->
 
 <details>
 <summary><b>Enable full video players with controls</b> — one-time, after the repository is pushed</summary>
@@ -112,8 +78,8 @@ and full resolution:
   --audio     https://github.com/user-attachments/assets/...
 ```
 
-The script swaps each preview for a `<video controls>` player between the markers already present in
-this file. `--reset` puts the previews back.
+The script rewrites the block between the `demos:start` / `demos:end` markers into real
+`<video controls>` players. `--reset` puts the GIF previews back.
 
 </details>
 
@@ -121,52 +87,24 @@ this file. `--reset` puts the previews back.
 
 ## Interface
 
-<table>
-<tr>
-<td width="50%" align="center">
-<img src="docs/media/ui-idle.png" alt="Idle state" width="100%"><br>
-<sub><b>Paste and go</b> — two fields, one button</sub>
-</td>
-<td width="50%" align="center">
-<img src="docs/media/ui-player-sync.png" alt="Video player synced to the result timestamp" width="100%"><br>
-<sub><b>Player sync</b> — the source video jumps to the moment it found</sub>
-</td>
-</tr>
-<tr>
-<td width="50%" align="center">
-<img src="docs/media/ui-hybrid-stages.png" alt="Live stage list and timeline" width="100%"><br>
-<sub><b>Live progress</b> — every stage reports as it runs, with its numbers</sub>
-</td>
-<td width="50%" align="center">
-<img src="docs/media/ui-hybrid-occurrences.png" alt="Occurrences list with classification badges" width="100%"><br>
-<sub><b>Every candidate, judged</b> — and why each was accepted or rejected</sub>
-</td>
-</tr>
-<tr>
-<td width="50%" align="center">
-<img src="docs/media/ui-ocr-candidates.png" alt="Candidate filmstrip" width="100%"><br>
-<sub><b>Filmstrip</b> — the frames considered, with their scores</sub>
-</td>
-<td width="50%" align="center">
-<img src="docs/media/ui-ocr-result.png" alt="OCR result showing the extracted text" width="100%"><br>
-<sub><b>Text extracted</b> — read straight off the frame</sub>
-</td>
-</tr>
-</table>
+| ![Idle state](docs/media/ui-idle.png) | ![Player synced to the result timestamp](docs/media/ui-player-sync.png) |
+|:---:|:---:|
+| **Paste and go** — two fields, one button | **Player sync** — the source video jumps to the moment it found |
+| ![Live stage list and timeline](docs/media/ui-hybrid-stages.png) | ![Occurrences with classification badges](docs/media/ui-hybrid-occurrences.png) |
+| **Live progress** — every stage reports as it runs, with its numbers | **Every candidate, judged** — and why each was accepted or rejected |
+| ![Candidate filmstrip](docs/media/ui-ocr-candidates.png) | ![OCR result showing the extracted text](docs/media/ui-ocr-result.png) |
+| **Filmstrip** — the frames considered, with their scores | **Text extracted** — read straight off the frame |
 
 <details>
 <summary><b>More screenshots</b> — mode picker, occurrence picker, title-card detection</summary>
 <br>
-<table>
-<tr>
-<td align="center"><img src="docs/media/ui-modes.png" width="100%"><br><sub>Four modes, one dropdown</sub></td>
-<td align="center"><img src="docs/media/ui-occurrence.png" width="100%"><br><sub>first / last / all occurrences</sub></td>
-</tr>
-<tr>
-<td align="center"><img src="docs/media/ui-ocr-titlecard.png" width="100%"><br><sub>Title cards and burned-in text</sub></td>
-<td align="center"><img src="docs/media/ui-ocr-player.png" width="100%"><br><sub>Result synced back to the source video</sub></td>
-</tr>
-</table>
+
+| ![Mode picker](docs/media/ui-modes.png) | ![Occurrence picker](docs/media/ui-occurrence.png) |
+|:---:|:---:|
+| Four modes, one dropdown | first / last / all occurrences |
+| ![Title-card detection](docs/media/ui-ocr-titlecard.png) | ![Result synced to the source video](docs/media/ui-ocr-player.png) |
+| Title cards and burned-in text | Result synced back to the source video |
+
 </details>
 
 ---
