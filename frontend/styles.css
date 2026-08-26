@@ -459,6 +459,12 @@ body {
   height: auto;
   border: 1px solid var(--line);
   background: var(--panel);
+  transition: transform 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.pair img:hover {
+  border-color: var(--teal);
+  box-shadow: 0 4px 16px rgba(79, 209, 197, 0.3);
 }
 
 .pair figcaption {

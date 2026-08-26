@@ -126,20 +126,18 @@ function syncVideoPlayer(url, timestamp_s = 0, shouldScroll = false) {
     html5Player.hidden = true;
     fallbackPlayer.hidden = true;
 
-    const ytEmbedUrl = `https://www.youtube-nocookie.com/embed/${ytId}?start=${startSec}&autoplay=0&rel=0&enablejsapi=1`;
+    const ytEmbedUrl = `https://www.youtube.com/embed/${ytId}?start=${startSec}&autoplay=0&rel=0&enablejsapi=1`;
     if (ytIframe) {
-      if (ytIframe.dataset.videoId === ytId && ytIframe.contentWindow) {
-        // Send real-time seek command to active YouTube iframe without reloading
-        try {
-          ytIframe.contentWindow.postMessage(JSON.stringify({ event: "command", func: "seekTo", args: [timestamp_s, true] }), "*");
-          ytIframe.contentWindow.postMessage(JSON.stringify({ event: "command", func: "pauseVideo", args: [] }), "*");
-        } catch {
-          ytIframe.src = ytEmbedUrl;
-        }
-      } else {
+      if (ytIframe.dataset.videoId !== ytId || ytIframe.dataset.startSec != startSec) {
         ytIframe.dataset.videoId = ytId;
         ytIframe.dataset.startSec = startSec;
         ytIframe.src = ytEmbedUrl;
+      }
+      if (ytIframe.contentWindow) {
+        try {
+          ytIframe.contentWindow.postMessage(JSON.stringify({ event: "command", func: "seekTo", args: [timestamp_s, true] }), "*");
+          ytIframe.contentWindow.postMessage(JSON.stringify({ event: "command", func: "pauseVideo", args: [] }), "*");
+        } catch {}
       }
     }
 
@@ -281,7 +279,7 @@ async function finish(st, msg, payload) {
   $("r-alts").textContent = r.alternatives?.length ? "Also at: " + r.alternatives.map((a) => `frame ${a.frame_index} (${tc(a.timestamp_s)})`).join(", ") : "";
   $("result").hidden = false;
 
-  // Make result clickable to jump video
+  // Make result and previous frame clickable to jump video
   $("r-tc").style.cursor = "pointer";
   $("r-tc").title = "Click to jump video to this result";
   $("r-tc").onclick = () => syncVideoPlayer($("url").value.trim(), r.timestamp_s, true);
@@ -289,6 +287,13 @@ async function finish(st, msg, payload) {
   $("r-img").style.cursor = "pointer";
   $("r-img").title = "Click to jump video to this result";
   $("r-img").onclick = () => syncVideoPlayer($("url").value.trim(), r.timestamp_s, true);
+
+  if (r.frame_index > 0) {
+    const prevTime = fps ? Math.max(0, (r.frame_index - 1) / fps) : Math.max(0, r.timestamp_s - 0.033);
+    $("r-prev").style.cursor = "pointer";
+    $("r-prev").title = "Click to jump video to this frame before";
+    $("r-prev").onclick = () => syncVideoPlayer($("url").value.trim(), prevTime, true);
+  }
 
   syncVideoPlayer($("url").value.trim(), r.timestamp_s, false);
 }
